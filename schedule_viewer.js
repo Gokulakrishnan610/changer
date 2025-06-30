@@ -982,55 +982,97 @@ function showQuickEditModal(sessionIndex) {
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <h6>Current Session Details</h6>
-                            <div class="card bg-light">
-                                <div class="card-body">
-                                    <div><strong>Course:</strong> ${session.course_code} - ${session.course_name || 'N/A'}</div>
-                                    <div><strong>Teacher:</strong> ${session.teacher_name}</div>
-                                    <div><strong>Room:</strong> ${session.room_number} (${session.block})</div>
-                                    <div><strong>Time:</strong> ${session.day} ${getSessionTimeSlot(session)}</div>
-                                    <div><strong>Group:</strong> ${session.group_name}</div>
-                                    <div><strong>Type:</strong> ${session.schedule_type}</div>
+                    <!-- Course Information Header -->
+                    <div class="card bg-primary text-white mb-3">
+                        <div class="card-body text-center">
+                            <h5 class="mb-1">${session.course_code} - ${session.course_name || 'N/A'}</h5>
+                            <small>Group: ${session.group_name} | Type: ${session.schedule_type.toUpperCase()}</small>
+                        </div>
+                    </div>
+
+                    <!-- From → To Layout -->
+                    <form id="quickEditForm">
+                        <div class="row">
+                            <!-- Day Change -->
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold">Day</label>
+                                <div class="d-flex align-items-center">
+                                    <div class="me-2">
+                                        <small class="text-muted">From:</small>
+                                        <div class="badge bg-light text-dark">${session.day.charAt(0).toUpperCase() + session.day.slice(1)}</div>
+                                    </div>
+                                    <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                                    <div class="flex-grow-1">
+                                        <small class="text-muted">To:</small>
+                                        <select class="form-control form-control-sm" id="quickEditDay" onchange="updateAvailability()">
+                                            <option value="monday" ${session.day === 'monday' ? 'selected' : ''}>Monday</option>
+                                            <option value="tuesday" ${session.day === 'tuesday' ? 'selected' : ''}>Tuesday</option>
+                                            <option value="wed" ${session.day === 'wed' ? 'selected' : ''}>Wednesday</option>
+                                            <option value="thur" ${session.day === 'thur' ? 'selected' : ''}>Thursday</option>
+                                            <option value="fri" ${session.day === 'fri' ? 'selected' : ''}>Friday</option>
+                                            <option value="saturday" ${session.day === 'saturday' ? 'selected' : ''}>Saturday</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Time Slot Change -->
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold">Time Slot</label>
+                                <div class="d-flex align-items-center">
+                                    <div class="me-2">
+                                        <small class="text-muted">From:</small>
+                                        <div class="badge bg-light text-dark">${getSessionTimeSlot(session)}</div>
+                                    </div>
+                                    <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                                    <div class="flex-grow-1">
+                                        <small class="text-muted">To:</small>
+                                        <select class="form-control form-control-sm" id="quickEditTimeSlot" onchange="updateAvailability()">
+                                            <!-- Will be populated dynamically -->
+                                        </select>
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                        <div class="col-md-6">
-                            <h6>Edit Session</h6>
-                            <form id="quickEditForm">
-                                <div class="mb-3">
-                                    <label class="form-label">Day</label>
-                                    <select class="form-control" id="quickEditDay" onchange="updateAvailability()">
-                                        <option value="monday" ${session.day === 'monday' ? 'selected' : ''}>Monday</option>
-                                        <option value="tuesday" ${session.day === 'tuesday' ? 'selected' : ''}>Tuesday</option>
-                                        <option value="wed" ${session.day === 'wed' ? 'selected' : ''}>Wednesday</option>
-                                        <option value="thur" ${session.day === 'thur' ? 'selected' : ''}>Thursday</option>
-                                        <option value="fri" ${session.day === 'fri' ? 'selected' : ''}>Friday</option>
-                                        <option value="saturday" ${session.day === 'saturday' ? 'selected' : ''}>Saturday</option>
-                                    </select>
+
+                        <div class="row">
+                            <!-- Teacher Change -->
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold">Teacher</label>
+                                <div class="d-flex align-items-center">
+                                    <div class="me-2 text-center" style="min-width: 120px;">
+                                        <small class="text-muted">From:</small>
+                                        <div class="badge bg-info text-wrap">${session.teacher_name}</div>
+                                    </div>
+                                    <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                                    <div class="flex-grow-1">
+                                        <small class="text-muted">To:</small>
+                                        <select class="form-control form-control-sm" id="quickEditTeacher" onchange="checkValidation()" onfocus="populateAvailableTeachers()">
+                                            <option value="${session.teacher_id}">${session.teacher_name} (${session.staff_code})</option>
+                                        </select>
+                                    </div>
                                 </div>
-                                <div class="mb-3">
-                                    <label class="form-label">Time Slot</label>
-                                    <select class="form-control" id="quickEditTimeSlot" onchange="updateAvailability()">
-                                        <!-- Will be populated dynamically -->
-                                    </select>
+                            </div>
+
+                            <!-- Room Change -->
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-bold">Room</label>
+                                <div class="d-flex align-items-center">
+                                    <div class="me-2 text-center" style="min-width: 120px;">
+                                        <small class="text-muted">From:</small>
+                                        <div class="badge bg-success text-wrap">${session.room_number} (${session.block})</div>
+                                    </div>
+                                    <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                                    <div class="flex-grow-1">
+                                        <small class="text-muted">To:</small>
+                                        <select class="form-control form-control-sm" id="quickEditRoom" onchange="checkValidation()" onfocus="populateAvailableRooms()">
+                                            <option value="${session.room_id}">${session.room_number} (${session.block}) - Cap: ${session.capacity}</option>
+                                        </select>
+                                    </div>
                                 </div>
-                                <div class="mb-3">
-                                    <label class="form-label">Teacher</label>
-                                    <select class="form-control" id="quickEditTeacher" onchange="checkValidation()">
-                                        <!-- Will be populated dynamically -->
-                                    </select>
-                                </div>
-                                <div class="mb-3">
-                                    <label class="form-label">Room</label>
-                                    <select class="form-control" id="quickEditRoom" onchange="checkValidation()">
-                                        <!-- Will be populated dynamically -->
-                                    </select>
-                                </div>
-                            </form>
+                            </div>
                         </div>
-                    </div>
+                    </form>
 
                     <!-- Validation Results -->
                     <div id="quickValidationResults" class="mt-3"></div>
@@ -1112,10 +1154,32 @@ function populateQuickTimeSlots(sessionType, currentTimeSlot) {
 // Populate teachers for quick edit (initial setup - will be filtered by updateAvailability)
 function populateQuickTeachers(currentTeacherId) {
     const teacherSelect = document.getElementById('quickEditTeacher');
+    // Default option is already set in HTML with current teacher
+    // This function is kept for compatibility but logic moved to populateAvailableTeachers
+}
+
+// Populate available teachers when dropdown is focused
+function populateAvailableTeachers() {
+    const teacherSelect = document.getElementById('quickEditTeacher');
+    const day = document.getElementById('quickEditDay').value;
+    const timeSlot = document.getElementById('quickEditTimeSlot').value;
+    
+    if (!day || !timeSlot || !window.allocationManager) return;
+    
+    // Get session type from the save button onclick to extract session index
+    const saveBtn = document.getElementById('quickSaveBtn');
+    const sessionIndex = parseInt(saveBtn.getAttribute('onclick').match(/\d+/)[0]);
+    const session = allData[sessionIndex];
+    const sessionType = session ? session.schedule_type : 'theory';
+    
+    const currentTeacherId = teacherSelect.value; // Preserve current selection
+    const availableTeachers = window.allocationManager.getAvailableTeachers(day, timeSlot);
+    
+    // Clear and repopulate
     teacherSelect.innerHTML = '<option value="">Select Teacher</option>';
     
-    // Add current teacher if available (will be updated by updateAvailability)
-    if (currentTeacherId && window.allocationManager && window.allocationManager.teachers) {
+    // Always add current teacher first (even if not available - user might want to keep it)
+    if (currentTeacherId) {
         const currentTeacher = Array.from(window.allocationManager.teachers)
             .map(teacherStr => JSON.parse(teacherStr))
             .find(teacher => teacher.id == currentTeacherId);
@@ -1123,20 +1187,74 @@ function populateQuickTeachers(currentTeacherId) {
         if (currentTeacher) {
             const option = document.createElement('option');
             option.value = currentTeacher.id;
-            option.textContent = `${currentTeacher.name} (${currentTeacher.staff_code})`;
+            option.textContent = `${currentTeacher.name} (${currentTeacher.staff_code}) ${availableTeachers.some(t => t.id == currentTeacherId) ? '✓' : '⚠️ (Busy)'}`;
             option.selected = true;
+            option.style.fontWeight = 'bold';
             teacherSelect.appendChild(option);
         }
+    }
+    
+    // Add available teachers
+    availableTeachers.forEach(teacher => {
+        if (teacher.id != currentTeacherId) { // Don't duplicate current teacher
+            const option = document.createElement('option');
+            option.value = teacher.id;
+            option.textContent = `${teacher.name} (${teacher.staff_code})`;
+            teacherSelect.appendChild(option);
+        }
+    });
+    
+    // Add separator and unavailable teachers in gray
+    const unavailableTeachers = Array.from(window.allocationManager.teachers)
+        .map(teacherStr => JSON.parse(teacherStr))
+        .filter(teacher => teacher.id != currentTeacherId && !availableTeachers.some(t => t.id == teacher.id));
+        
+    if (unavailableTeachers.length > 0) {
+        // Add separator
+        const separator = document.createElement('option');
+        separator.disabled = true;
+        separator.textContent = '─── Unavailable Teachers ───';
+        teacherSelect.appendChild(separator);
+        
+        unavailableTeachers.forEach(teacher => {
+            const option = document.createElement('option');
+            option.value = teacher.id;
+            option.textContent = `${teacher.name} (${teacher.staff_code}) - Busy`;
+            option.style.color = '#999';
+            teacherSelect.appendChild(option);
+        });
     }
 }
 
 // Populate rooms for quick edit (initial setup - will be filtered by updateAvailability)
 function populateQuickRooms(currentRoomId, sessionType) {
     const roomSelect = document.getElementById('quickEditRoom');
-    roomSelect.innerHTML = '<option value="">Select Room</option>';
+    // Default option is already set in HTML with current room
+    // This function is kept for compatibility but logic moved to populateAvailableRooms
+}
 
-    // Add current room if available (will be updated by updateAvailability)
-    if (currentRoomId && window.allocationManager && window.allocationManager.rooms) {
+// Populate available rooms when dropdown is focused
+function populateAvailableRooms() {
+    const roomSelect = document.getElementById('quickEditRoom');
+    const day = document.getElementById('quickEditDay').value;
+    const timeSlot = document.getElementById('quickEditTimeSlot').value;
+    
+    if (!day || !timeSlot || !window.allocationManager) return;
+    
+    // Get session type from the save button onclick to extract session index
+    const saveBtn = document.getElementById('quickSaveBtn');
+    const sessionIndex = parseInt(saveBtn.getAttribute('onclick').match(/\d+/)[0]);
+    const session = allData[sessionIndex];
+    const sessionType = session ? session.schedule_type : 'theory';
+    
+    const currentRoomId = roomSelect.value; // Preserve current selection
+    const availableRooms = window.allocationManager.getAvailableRooms(day, timeSlot, sessionType);
+    
+    // Clear and repopulate
+    roomSelect.innerHTML = '<option value="">Select Room</option>';
+    
+    // Always add current room first (even if not available - user might want to keep it)
+    if (currentRoomId) {
         const currentRoom = Array.from(window.allocationManager.rooms)
             .map(roomStr => JSON.parse(roomStr))
             .find(room => room.id == currentRoomId);
@@ -1144,10 +1262,52 @@ function populateQuickRooms(currentRoomId, sessionType) {
         if (currentRoom) {
             const option = document.createElement('option');
             option.value = currentRoom.id;
-            option.textContent = `${currentRoom.number} (${currentRoom.block}) - Cap: ${currentRoom.capacity}`;
+            option.textContent = `${currentRoom.number} (${currentRoom.block}) - Cap: ${currentRoom.capacity} ${availableRooms.some(r => r.id == currentRoomId) ? '✓' : '⚠️ (Busy)'}`;
             option.selected = true;
+            option.style.fontWeight = 'bold';
             roomSelect.appendChild(option);
         }
+    }
+    
+    // Add available rooms
+    availableRooms.forEach(room => {
+        if (room.id != currentRoomId) { // Don't duplicate current room
+            const option = document.createElement('option');
+            option.value = room.id;
+            option.textContent = `${room.number} (${room.block}) - Cap: ${room.capacity}`;
+            roomSelect.appendChild(option);
+        }
+    });
+    
+    // Add separator and unavailable rooms in gray
+    const unavailableRooms = Array.from(window.allocationManager.rooms)
+        .map(roomStr => JSON.parse(roomStr))
+        .filter(room => {
+            if (room.id == currentRoomId) return false; // Don't duplicate current room
+            if (availableRooms.some(r => r.id == room.id)) return false; // Don't duplicate available rooms
+            
+            // Filter by session type
+            const roomType = window.allocationManager.getRoomType(room.number);
+            if (sessionType === 'lab' && roomType !== 'lab') return false;
+            if (sessionType === 'theory' && roomType === 'lab') return false;
+            
+            return true;
+        });
+        
+    if (unavailableRooms.length > 0) {
+        // Add separator
+        const separator = document.createElement('option');
+        separator.disabled = true;
+        separator.textContent = '─── Unavailable Rooms ───';
+        roomSelect.appendChild(separator);
+        
+        unavailableRooms.forEach(room => {
+            const option = document.createElement('option');
+            option.value = room.id;
+            option.textContent = `${room.number} (${room.block}) - Cap: ${room.capacity} - Busy`;
+            option.style.color = '#999';
+            roomSelect.appendChild(option);
+        });
     }
 }
 
@@ -1166,43 +1326,29 @@ function updateAvailability() {
     const session = allData[sessionIndex];
     const sessionType = session ? session.schedule_type : 'theory';
 
-    // Update dropdowns to show only available options
-    updateQuickDropdowns(day, timeSlot, sessionType);
+    // Reset dropdowns to current values (they will be populated on focus)
+    const teacherSelect = document.getElementById('quickEditTeacher');
+    const roomSelect = document.getElementById('quickEditRoom');
+    
+    // If dropdowns don't have values, they may need to be repopulated with current session data
+    if (!teacherSelect.value && session) {
+        teacherSelect.innerHTML = `<option value="${session.teacher_id}" selected>${session.teacher_name} (${session.staff_code})</option>`;
+    }
+    
+    if (!roomSelect.value && session) {
+        roomSelect.innerHTML = `<option value="${session.room_id}" selected>${session.room_number} (${session.block}) - Cap: ${session.capacity}</option>`;
+    }
+
     checkValidation();
 }
 
-// Update dropdowns to show only available options
+// Update dropdowns to show only available options (compatibility function)
 function updateQuickDropdowns(day, timeSlot, sessionType) {
     if (!window.allocationManager) return;
 
-    const availableRooms = window.allocationManager.getAvailableRooms(day, timeSlot, sessionType);
-    const availableTeachers = window.allocationManager.getAvailableTeachers(day, timeSlot);
-
-    // Get current selections
-    const roomSelect = document.getElementById('quickEditRoom');
-    const teacherSelect = document.getElementById('quickEditTeacher');
-    const currentRoomId = roomSelect.value;
-    const currentTeacherId = teacherSelect.value;
-
-    // Update room dropdown with only available rooms
-    roomSelect.innerHTML = '<option value="">Select Room</option>';
-    availableRooms.forEach(room => {
-        const option = document.createElement('option');
-        option.value = room.id;
-        option.textContent = `${room.number} (${room.block}) - Cap: ${room.capacity}`;
-        option.selected = (room.id == currentRoomId);
-        roomSelect.appendChild(option);
-    });
-
-    // Update teacher dropdown with only available teachers
-    teacherSelect.innerHTML = '<option value="">Select Teacher</option>';
-    availableTeachers.forEach(teacher => {
-        const option = document.createElement('option');
-        option.value = teacher.id;
-        option.textContent = `${teacher.name} (${teacher.staff_code})`;
-        option.selected = (teacher.id == currentTeacherId);
-        teacherSelect.appendChild(option);
-    });
+    // Note: Dropdowns are now populated on focus (onfocus events)
+    // This function now just validates current selections
+    checkValidation();
 }
 
 // Check validation for quick edit
