@@ -127,17 +127,28 @@ class AllocationManager {
                 fetch('./output/combined_lab_schedule.json'),
                 fetch('./output/combined_theory_schedule.json')
             ]);
-            
+
             if (!labRes.ok || !theoryRes.ok) {
                 throw new Error(`Failed to fetch data files. Lab: ${labRes.status}, Theory: ${theoryRes.status}`);
             }
             
             this.updateLoadingProgress(40);
             console.log('📊 Parsing JSON data...');
-            
-            this.labData = await labRes.json();
-            this.theoryData = await theoryRes.json();
-            this.allData = [...this.labData, ...this.theoryData];
+
+            const labData = await labRes.json();
+            const theoryData = await theoryRes.json();
+
+            // ✅ ADDED: Assign session indices to all sessions for proper validation
+            labData.forEach((session, index) => {
+                session.sessionIndex = index;
+            });
+            theoryData.forEach((session, index) => {
+                session.sessionIndex = labData.length + index;
+            });
+
+            this.labData = labData;
+            this.theoryData = theoryData;
+            this.allData = [...labData, ...theoryData];
             
             console.log(`✅ Loaded ${this.labData.length} lab sessions and ${this.theoryData.length} theory sessions`);
             this.updateLoadingProgress(70);
@@ -1198,13 +1209,36 @@ class AllocationManager {
         // Create a temporary dataset for validation
         let tempData = [...this.allData];
         
+        console.log(`🔍 validateAllocation: Starting with ${tempData.length} sessions in tempData`);
+        console.log(`   New session index: ${newSession.sessionIndex}`);
+        console.log(`   Original session index: ${originalSession?.sessionIndex}`);
+        
         // Remove original session if editing
         if (originalSession) {
-            tempData = tempData.filter(s => s !== originalSession);
+            // ✅ FIXED: Use session index comparison instead of object reference
+            const beforeFilter = tempData.length;
+            tempData = tempData.filter(s => {
+                // If both sessions have sessionIndex, compare by that
+                if (s.sessionIndex !== undefined && originalSession.sessionIndex !== undefined) {
+                    const shouldKeep = s.sessionIndex !== originalSession.sessionIndex;
+                    if (!shouldKeep) {
+                        console.log(`🔍 Filtering out session ${s.course_code} (index: ${s.sessionIndex}) - matches original session index`);
+                    }
+                    return shouldKeep;
+                }
+                // Fallback to object reference comparison
+                const shouldKeep = s !== originalSession;
+                if (!shouldKeep) {
+                    console.log(`🔍 Filtering out session ${s.course_code} by object reference`);
+                }
+                return shouldKeep;
+            });
+            console.log(`🔍 validateAllocation: Filtered out ${beforeFilter - tempData.length} sessions, ${tempData.length} remaining`);
         }
         
         // Add new session
         tempData.push(newSession);
+        console.log(`🔍 validateAllocation: Added new session, total: ${tempData.length}`);
 
         // Check for conflicts with the new session
         const conflictChecks = [
@@ -1235,11 +1269,43 @@ class AllocationManager {
         const teacherSessions = tempData.filter(s => 
             s.teacher_id === newSession.teacher_id &&
             s.day === newSession.day &&
+            // ✅ FIXED: Better session comparison for updates
+            // Compare by session index or unique identifier instead of object reference
+            !(s.sessionIndex !== undefined && newSession.sessionIndex !== undefined && s.sessionIndex === newSession.sessionIndex) &&
+            // ✅ FIXED: Exclude sessions with same course code and group
+            !(s.course_code === newSession.course_code && s.group_name === newSession.group_name) &&
             s !== newSession
         );
 
+        // ✅ ADDED: Debug logging for teacher availability check
+        if (teacherSessions.length > 0) {
+            console.log(`🔍 Teacher availability check for ${newSession.teacher_name} on ${newSession.day}:`);
+            console.log(`   New session index: ${newSession.sessionIndex}`);
+            teacherSessions.forEach(s => {
+                console.log(`   Found conflicting session: ${s.course_code} (index: ${s.sessionIndex}) at ${this.getTimeKey(s)}`);
+            });
+        }
+
+        // ✅ ADDED: Debug logging for excluded sessions
+        const excludedSessions = tempData.filter(s => 
+            s.teacher_id === newSession.teacher_id &&
+            s.day === newSession.day &&
+            s.course_code === newSession.course_code &&
+            s.group_name === newSession.group_name &&
+            s !== newSession
+        );
+        if (excludedSessions.length > 0) {
+            console.log(`🔍 Excluded ${excludedSessions.length} sessions with same course code and group from teacher validation:`);
+            excludedSessions.forEach(s => {
+                console.log(`   Excluded: ${s.course_code} (index: ${s.sessionIndex}) at ${this.getTimeKey(s)}`);
+            });
+        }
+
         teacherSessions.forEach(session => {
-            if (this.doTimeSlotsOverlap(newSession, session)) {
+            const overlaps = this.doTimeSlotsOverlap(newSession, session);
+            console.log(`🔍 Time overlap check: ${newSession.course_code} (${this.getTimeKey(newSession)}) vs ${session.course_code} (${this.getTimeKey(session)}) = ${overlaps}`);
+            
+            if (overlaps) {
                 conflicts.push({
                     type: 'teacher_conflict',
                     message: `Teacher ${newSession.teacher_name} is already scheduled at this time`,
@@ -1260,11 +1326,28 @@ class AllocationManager {
         const roomSessions = tempData.filter(s => 
             s.room_id === newSession.room_id &&
             s.day === newSession.day &&
+            // ✅ FIXED: Better session comparison for updates
+            // Compare by session index or unique identifier instead of object reference
+            !(s.sessionIndex !== undefined && newSession.sessionIndex !== undefined && s.sessionIndex === newSession.sessionIndex) &&
+            // ✅ FIXED: Exclude sessions with same course code and group
+            !(s.course_code === newSession.course_code && s.group_name === newSession.group_name) &&
             s !== newSession
         );
 
+        // ✅ ADDED: Debug logging for room availability check
+        if (roomSessions.length > 0) {
+            console.log(`🔍 Room availability check for ${newSession.room_number} on ${newSession.day}:`);
+            console.log(`   New session index: ${newSession.sessionIndex}`);
+            roomSessions.forEach(s => {
+                console.log(`   Found conflicting session: ${s.course_code} (index: ${s.sessionIndex}) at ${this.getTimeKey(s)}`);
+            });
+        }
+
         roomSessions.forEach(session => {
-            if (this.doTimeSlotsOverlap(newSession, session)) {
+            const overlaps = this.doTimeSlotsOverlap(newSession, session);
+            console.log(`🔍 Room time overlap check: ${newSession.course_code} (${this.getTimeKey(newSession)}) vs ${session.course_code} (${this.getTimeKey(session)}) = ${overlaps}`);
+            
+            if (overlaps) {
                 conflicts.push({
                     type: 'room_conflict',
                     message: `Room ${newSession.room_number} is already booked at this time`,
@@ -1294,6 +1377,9 @@ class AllocationManager {
         if (newSession.schedule_type === 'theory') {
             const sameGroupTheoryConflicts = tempData.filter(s => 
                 s !== newSession &&
+                // ✅ FIXED: Exclude all sessions with same course code and group when updating
+                !(s.sessionIndex !== undefined && newSession.sessionIndex !== undefined && s.sessionIndex === newSession.sessionIndex) &&
+                !(s.course_code === newSession.course_code && s.group_name === newSession.group_name) &&
                 s.schedule_type === 'theory' &&
                 s.day === newSession.day &&
                 s.time_slot === newSession.time_slot &&
@@ -1321,6 +1407,9 @@ class AllocationManager {
         if (newSession.schedule_type === 'lab') {
             const sameGroupLabConflicts = tempData.filter(s => 
                 s !== newSession &&
+                // ✅ FIXED: Exclude all sessions with same course code and group when updating
+                !(s.sessionIndex !== undefined && newSession.sessionIndex !== undefined && s.sessionIndex === newSession.sessionIndex) &&
+                !(s.course_code === newSession.course_code && s.group_name === newSession.group_name) &&
                 s.schedule_type === 'lab' &&
                 s.day === newSession.day &&
                 this.doTimeSlotsOverlap(newSession, s) &&
@@ -1347,6 +1436,9 @@ class AllocationManager {
         if (newSession.schedule_type === 'theory') {
             const sameGroupLabConflicts = tempData.filter(s => 
                 s !== newSession &&
+                // ✅ FIXED: Exclude all sessions with same course code and group when updating
+                !(s.sessionIndex !== undefined && newSession.sessionIndex !== undefined && s.sessionIndex === newSession.sessionIndex) &&
+                !(s.course_code === newSession.course_code && s.group_name === newSession.group_name) &&
                 s.schedule_type === 'lab' &&
                 s.day === newSession.day &&
                 s.group_name === newSession.group_name &&  // Same group only
@@ -1388,6 +1480,9 @@ class AllocationManager {
             s.group_name === newSession.group_name &&
             s.day === newSession.day &&
             s !== newSession &&
+            // ✅ FIXED: Exclude all sessions with same course code and group when updating
+            !(s.sessionIndex !== undefined && newSession.sessionIndex !== undefined && s.sessionIndex === newSession.sessionIndex) &&
+            !(s.course_code === newSession.course_code && s.group_name === newSession.group_name) &&
             this.doTimeSlotsOverlap(newSession, s)
         );
 
@@ -1492,10 +1587,26 @@ class AllocationManager {
 
     // Apply allocation change
     async applyAllocationChange(sessionIndex, updatedSession) {
+        console.log(`🚀 applyAllocationChange called with sessionIndex: ${sessionIndex}`);
+        
         const originalSession = this.allData[sessionIndex];
+        
+        // ✅ ADDED: Session indices for proper validation
+        originalSession.sessionIndex = sessionIndex;
+        updatedSession.sessionIndex = sessionIndex;
+        
+        console.log(`🔍 Validating allocation change for session ${sessionIndex}:`);
+        console.log(`   Original: ${originalSession.course_code} - ${originalSession.day} ${this.getTimeKey(originalSession)} - ${originalSession.teacher_name} - ${originalSession.room_number}`);
+        console.log(`   Updated:  ${updatedSession.course_code} - ${updatedSession.day} ${this.getTimeKey(updatedSession)} - ${updatedSession.teacher_name} - ${updatedSession.room_number}`);
+        
         const validation = this.validateAllocation(updatedSession, originalSession);
         
         if (!validation.isValid) {
+            console.log(`❌ Validation failed with ${validation.conflicts.length} conflicts:`);
+            validation.conflicts.forEach((conflict, index) => {
+                console.log(`   ${index + 1}. ${conflict.type}: ${conflict.message}`);
+            });
+            
             return {
                 success: false,
                 message: 'Allocation change failed validation',

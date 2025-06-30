@@ -2561,6 +2561,7 @@ async function saveQuickEdit(sessionIndex) {
 
     // Create updated session
     const updatedSession = { ...session };
+    updatedSession.sessionIndex = sessionIndex; // ✅ ADDED: Session index for proper validation
     updatedSession.day = day;
     
     // Update student count
@@ -2669,7 +2670,12 @@ async function saveQuickEdit(sessionIndex) {
         console.log(`   New: ${updatedSession.day} ${getSessionTimeSlot(updatedSession)} - ${updatedSession.teacher_name} - ${updatedSession.room_number} - Students: ${updatedSession.student_count || 'N/A'}`);
         
         // Apply the change using allocation manager
+        console.log(`🔍 Calling allocation manager with sessionIndex: ${sessionIndex}`);
+        console.log(`🔍 Updated session:`, updatedSession);
+        
         const result = await window.allocationManager.applyAllocationChange(sessionIndex, updatedSession);
+        
+        console.log(`🔍 Allocation manager result:`, result);
         
         if (result.success) {
             // ✅ COMPLETE SESSION REPLACEMENT: Delete old session and add new one
@@ -3396,6 +3402,7 @@ async function performSessionMove(sessionIndex, newDay, newTimeSlot) {
     
     // Create updated session
     const updatedSession = { ...session };
+    updatedSession.sessionIndex = sessionIndex; // ✅ ADDED: Session index for proper validation
     updatedSession.day = newDay;
     
     if (session.schedule_type === 'lab') {
