@@ -1321,28 +1321,28 @@ function detectConflicts() {
             }
         });
                 
-        // All conflict types processed
-        const endTime = performance.now();
+                // All conflict types processed
+                const endTime = performance.now();
         console.log(`⚡ Allocation manager style conflict detection completed in ${(endTime - startTime).toFixed(2)}ms`);
                 
-        // Update UI
-        totalConflicts.textContent = detectedConflicts.length;
-        conflictStats.style.display = detectedConflicts.length > 0 ? 'block' : 'none';
+                // Update UI
+                totalConflicts.textContent = detectedConflicts.length;
+                conflictStats.style.display = detectedConflicts.length > 0 ? 'block' : 'none';
 
-        // Show/hide buttons
-        conflictBtn.innerHTML = `<i class="fas fa-exclamation-triangle me-1"></i>${detectedConflicts.length} Conflicts Found`;
-        conflictBtn.disabled = false;
-        clearBtn.style.display = detectedConflicts.length > 0 ? 'inline-block' : 'none';
+                // Show/hide buttons
+                conflictBtn.innerHTML = `<i class="fas fa-exclamation-triangle me-1"></i>${detectedConflicts.length} Conflicts Found`;
+                conflictBtn.disabled = false;
+                clearBtn.style.display = detectedConflicts.length > 0 ? 'inline-block' : 'none';
 
-        // Highlight conflicts in the schedule
-        highlightConflicts();
+                // Highlight conflicts in the schedule
+                highlightConflicts();
 
-        // Show conflict panel if conflicts found
-        if (detectedConflicts.length > 0) {
-            showConflictPanel();
-        }
+                // Show conflict panel if conflicts found
+                if (detectedConflicts.length > 0) {
+                    showConflictPanel();
+                }
 
-        console.log(`✅ Conflict detection complete. Found ${detectedConflicts.length} conflicts.`);
+                console.log(`✅ Conflict detection complete. Found ${detectedConflicts.length} conflicts.`);
     }, 10); // Small delay to allow UI to update with loading state
 }
 
@@ -1512,24 +1512,24 @@ function detectTimeSlotExclusivityConflicts() {
                 if (doTimeSlotsOverlap(session1, session2)) {
                     // Different session types within same group = conflict
                     if (session1.schedule_type !== session2.schedule_type) {
-                        detectedConflicts.push({
+            detectedConflicts.push({
                             type: 'same_group_mixed_session_overlap',
-                            severity: 'high',
+                severity: 'high',
                             message: `Group ${groupName}: ${session1.schedule_type} session ${session1.course_code} overlaps with ${session2.schedule_type} session ${session2.course_code}`,
                             sessions: [
                                 { ...session1, originalIndex: sessions[i].index },
                                 { ...session2, originalIndex: sessions[j].index }
                             ],
-                            details: {
+                details: {
                                 rule: 'Same Group Session Overlap Prevention',
                                 group: groupName,
                                 day: day,
                                 session1: `${session1.course_code} (${session1.schedule_type})`,
                                 session2: `${session2.course_code} (${session2.schedule_type})`,
                                 reason: 'Same group cannot have overlapping sessions of different types'
-                            }
-                        });
-                    }
+                }
+            });
+        }
                 }
             }
         }
@@ -1743,7 +1743,7 @@ function showQuickEditModal(sessionIndex) {
                             </div>
                         </div>
 
-                        <!-- Day Change -->
+                            <!-- Day Change -->
                         <div class="row mb-3">
                             <div class="col-md-6">
                                 <label class="form-label fw-bold">Day</label>
@@ -1783,11 +1783,11 @@ function showQuickEditModal(sessionIndex) {
                                             <option value="lab" ${session.schedule_type === 'lab' ? 'selected' : ''}>Lab</option>
                                         </select>
                                     </div>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
 
-                        <!-- Time Slot Change -->
+                            <!-- Time Slot Change -->
                         <div class="row mb-3">
                             <div class="col-md-12">
                                 <label class="form-label fw-bold">Time Slot</label>
@@ -1808,7 +1808,7 @@ function showQuickEditModal(sessionIndex) {
                             </div>
                         </div>
 
-                        <!-- Teacher Change -->
+                            <!-- Teacher Change -->
                         <div class="row mb-3">
                             <div class="col-md-12">
                                 <label class="form-label fw-bold">Teacher</label>
@@ -1824,11 +1824,11 @@ function showQuickEditModal(sessionIndex) {
                                             <option value="${session.teacher_id}">${session.teacher_name} (${session.staff_code})</option>
                                         </select>
                                     </div>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
 
-                        <!-- Room Change -->
+                            <!-- Room Change -->
                         <div class="row mb-3">
                             <div class="col-md-12">
                                 <label class="form-label fw-bold">Room</label>

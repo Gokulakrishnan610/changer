@@ -45,6 +45,8 @@ class ScheduleServer {
     async handlePost(req, res, pathname) {
         if (pathname === '/api/save-schedule') {
             await this.handleSaveSchedule(req, res);
+        } else if (pathname === '/api/save-csv') {
+            await this.handleSaveCsv(req, res);
         } else {
             this.sendError(res, 404, 'Endpoint not found');
         }
@@ -95,6 +97,54 @@ class ScheduleServer {
         } catch (error) {
             console.error('❌ Error saving file:', error.message);
             this.sendError(res, 500, `Error saving file: ${error.message}`);
+        }
+    }
+
+    async handleSaveCsv(req, res) {
+        try {
+            // Read request body
+            const body = await this.readRequestBody(req);
+            const data = JSON.parse(body);
+            
+            const csvData = data.data || '';
+            const filepath = data.filepath || '';
+            
+            // Validate filepath for security
+            if (!filepath.startsWith('./output/')) {
+                this.sendError(res, 400, 'Invalid file path');
+                return;
+            }
+
+            // Create backup before saving
+            if (fsSync.existsSync(filepath)) {
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+                const backupPath = filepath.replace('.csv', `_backup_${timestamp}.csv`);
+                await fs.copyFile(filepath, backupPath);
+                console.log(`✅ CSV Backup created: ${backupPath}`);
+            }
+
+            // Ensure output directory exists
+            const dir = path.dirname(filepath);
+            await fs.mkdir(dir, { recursive: true });
+
+            // Save the CSV file
+            await fs.writeFile(filepath, csvData, 'utf8');
+            console.log(`✅ Saved CSV data to ${filepath}`);
+
+            // Send success response
+            const response = {
+                success: true,
+                message: `Successfully saved CSV data to ${filepath}`,
+                filepath: filepath,
+                timestamp: new Date().toISOString()
+            };
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(response));
+
+        } catch (error) {
+            console.error('❌ Error saving CSV file:', error.message);
+            this.sendError(res, 500, `Error saving CSV file: ${error.message}`);
         }
     }
 
@@ -168,7 +218,7 @@ class ScheduleServer {
         this.server.listen(this.port, () => {
             console.log('🚀 Fast Schedule Manager Server (Node.js) running on http://localhost:' + this.port);
             console.log('📁 Serving files from current directory');
-            console.log('💾 API endpoint: POST /api/save-schedule');
+            console.log('💾 API endpoints: POST /api/save-schedule, POST /api/save-csv');
             console.log('🔄 CORS enabled for all origins');
             console.log('⚡ Optimized for speed and performance');
             console.log('Press Ctrl+C to stop the server');
