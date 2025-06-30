@@ -1396,15 +1396,15 @@ class AllocationManager {
                 // ✅ NEW LOGIC: Only flag if it's the exact same course
                 if (session.course_code === newSession.course_code && 
                     session.schedule_type === newSession.schedule_type) {
-                    conflicts.push({
+                conflicts.push({
                         type: 'duplicate_course_in_group',
                         message: `Group ${newSession.group_name} already has the same course ${session.course_code} (${session.schedule_type}) at this time`,
-                        conflictingSession: session,
-                        details: {
-                            currentSession: `${newSession.course_code} (${newSession.schedule_type})`,
-                            conflictingSession: `${session.course_code} (${session.schedule_type})`,
-                            timeSlot: this.getTimeKey(session),
-                            day: session.day,
+                    conflictingSession: session,
+                    details: {
+                        currentSession: `${newSession.course_code} (${newSession.schedule_type})`,
+                        conflictingSession: `${session.course_code} (${session.schedule_type})`,
+                        timeSlot: this.getTimeKey(session),
+                        day: session.day,
                             group: session.group_name,
                             reason: 'Exact same course cannot be duplicated for same group'
                         }

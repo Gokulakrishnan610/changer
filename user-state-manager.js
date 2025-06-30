@@ -83,6 +83,7 @@ class UserStateManager {
         
         this.listeners = new Map();
         this.loadFromStorage();
+        this.ensureProperSets(); // Ensure Sets are properly initialized
         this.initializePerformanceMonitor();
     }
     
@@ -130,10 +131,17 @@ class UserStateManager {
             const saved = localStorage.getItem('userState');
             if (saved) {
                 const savedState = JSON.parse(saved);
+                
+                // First ensure we have the correct structure
+                if (!savedState.dataState) savedState.dataState = {};
+                if (!savedState.ui) savedState.ui = {};
+                
+                // Merge state but preserve Sets and Maps
                 this.state = this.mergeDeep(this.state, savedState);
                 
-                // Convert Sets back from arrays
+                // Convert Sets and Maps back from arrays
                 this.state.dataState.loadedPages = new Set(savedState.dataState?.loadedPages || []);
+                this.state.dataState.cache = new Map(savedState.dataState?.cache || []);
                 this.state.ui.selectedSessions = new Set(savedState.ui?.selectedSessions || []);
                 this.state.ui.expandedSections = new Set(savedState.ui?.expandedSections || []);
                 
@@ -141,6 +149,26 @@ class UserStateManager {
             }
         } catch (error) {
             console.warn('Failed to load user state from storage:', error);
+            // If loading fails, ensure we have proper Sets
+            this.ensureProperSets();
+        }
+    }
+
+    /**
+     * Ensure all Sets and Maps are properly initialized
+     */
+    ensureProperSets() {
+        if (!this.state.dataState.loadedPages || typeof this.state.dataState.loadedPages.add !== 'function') {
+            this.state.dataState.loadedPages = new Set();
+        }
+        if (!this.state.dataState.cache || typeof this.state.dataState.cache.set !== 'function') {
+            this.state.dataState.cache = new Map();
+        }
+        if (!this.state.ui.selectedSessions || typeof this.state.ui.selectedSessions.add !== 'function') {
+            this.state.ui.selectedSessions = new Set();
+        }
+        if (!this.state.ui.expandedSections || typeof this.state.ui.expandedSections.add !== 'function') {
+            this.state.ui.expandedSections = new Set();
         }
     }
     
@@ -151,10 +179,11 @@ class UserStateManager {
         try {
             const stateToSave = { ...this.state };
             
-            // Convert Sets to arrays for JSON serialization
-            stateToSave.dataState.loadedPages = Array.from(this.state.dataState.loadedPages);
-            stateToSave.ui.selectedSessions = Array.from(this.state.ui.selectedSessions);
-            stateToSave.ui.expandedSections = Array.from(this.state.ui.expandedSections);
+            // Convert Sets and Maps to arrays for JSON serialization
+            stateToSave.dataState.loadedPages = Array.from(this.state.dataState.loadedPages || []);
+            stateToSave.dataState.cache = Array.from(this.state.dataState.cache || []);
+            stateToSave.ui.selectedSessions = Array.from(this.state.ui.selectedSessions || []);
+            stateToSave.ui.expandedSections = Array.from(this.state.ui.expandedSections || []);
             
             localStorage.setItem('userState', JSON.stringify(stateToSave));
         } catch (error) {
@@ -271,7 +300,25 @@ class UserStateManager {
      * Update data loading state
      */
     updateDataState(dataState) {
+        // Preserve Sets and Maps when updating
+        const currentLoadedPages = this.state.dataState.loadedPages;
+        const currentCache = this.state.dataState.cache;
+        
         this.state.dataState = { ...this.state.dataState, ...dataState };
+        
+        // Restore Sets and Maps if they were overwritten
+        if (dataState.loadedPages && !(dataState.loadedPages instanceof Set)) {
+            this.state.dataState.loadedPages = new Set(dataState.loadedPages);
+        } else if (!this.state.dataState.loadedPages) {
+            this.state.dataState.loadedPages = currentLoadedPages || new Set();
+        }
+        
+        if (dataState.cache && !(dataState.cache instanceof Map)) {
+            this.state.dataState.cache = new Map(dataState.cache);
+        } else if (!this.state.dataState.cache) {
+            this.state.dataState.cache = currentCache || new Map();
+        }
+        
         this.saveToStorage();
         this.notifyListeners('dataStateChanged', this.state.dataState);
     }
@@ -353,6 +400,10 @@ class UserStateManager {
         try {
             const importedState = JSON.parse(stateString);
             this.state = this.mergeDeep(this.getDefaultState(), importedState);
+            
+            // Ensure Sets and Maps are properly restored
+            this.ensureProperSets();
+            
             this.saveToStorage();
             this.notifyListeners('stateImported', this.state);
             return true;

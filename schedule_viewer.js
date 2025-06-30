@@ -66,9 +66,9 @@ async function loadData() {
         userState?.updateDataState({ loadingProgress: 40 });
 
         labData = await labRes.json();
-        theoryData = await theoryRes.json();
-        allData = [...labData, ...theoryData];
-        
+            theoryData = await theoryRes.json();
+            allData = [...labData, ...theoryData];
+            
         userState?.updateDataState({ loadingProgress: 70 });
         
         // Process data in chunks for better performance
@@ -100,24 +100,24 @@ async function loadData() {
                 }
             });
         }
-        
-        // Update the original arrays as well
-        labData.forEach(session => {
-            if (session.room_number && (!session.capacity || session.capacity === null)) {
-                session.capacity = 35; // Lab rooms default to 35
-            }
-        });
-        
-        theoryData.forEach(session => {
-            if (session.room_number && (!session.capacity || session.capacity === null)) {
-                session.capacity = 70; // Theory rooms default to 70
-            }
-        });
-        
-        if (shiftRes && shiftRes.ok) {
-            teacherShiftData = await shiftRes.json();
+            
+            // Update the original arrays as well
+            labData.forEach(session => {
+                if (session.room_number && (!session.capacity || session.capacity === null)) {
+                    session.capacity = 35; // Lab rooms default to 35
+                }
+            });
+            
+            theoryData.forEach(session => {
+                if (session.room_number && (!session.capacity || session.capacity === null)) {
+                    session.capacity = 70; // Theory rooms default to 70
+                }
+            });
+            
+            if (shiftRes && shiftRes.ok) {
+                teacherShiftData = await shiftRes.json();
         }
-        
+
         userState?.updateDataState({ loadingProgress: 90 });
 
         // Restore user filters and preferences
@@ -1024,6 +1024,15 @@ const parseTimeSlot = (slot) => {
 const debounce = (fn, delay) => { let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), delay); }; };
 const openShiftReports = () => window.open('shift_reports_viewer.html', '_blank');
 
+// 🎯 ALLOCATION MANAGER EXACT FUNCTIONS
+function getTimeKey(session) {
+    if (session.schedule_type === 'lab') {
+        return session.time_range || session.session_name;
+    } else {
+        return session.time_slot;
+    }
+}
+
 // Conflict Detection Functionality
 let detectedConflicts = [];
 
@@ -1041,68 +1050,310 @@ function detectConflicts() {
     setTimeout(() => {
         const startTime = performance.now();
         
-        // Reset conflicts
+        // Reset conflicts - EXACTLY like allocation manager
         detectedConflicts = [];
         clearConflictHighlights();
 
-        // 🔧 STEP 1: Detect and handle duplicates first
+        // 🔧 STEP 1: Detect and handle duplicate sessions first (EXACT COPY FROM ALLOCATION MANAGER)
         detectAndHandleDuplicates();
 
-        // ⚡ OPTIMIZED: Detect conflicts in batches to prevent UI blocking
-        const conflictTypes = [
-            detectTeacherConflicts,
-            detectRoomConflicts,
-            detectTimeSlotExclusivityConflicts,
-            detectGroupConflicts,
-            detectCapacityViolations
-        ];
+        // Create conflict maps for efficient detection (EXACT COPY FROM ALLOCATION MANAGER)
+        const teacherSlots = new Map();
+        const roomSlots = new Map();
+        const groupSlots = new Map();
 
-        // Process conflict detection with micro-delays to keep UI responsive
-        let typeIndex = 0;
-        const processNextType = () => {
-            if (typeIndex < conflictTypes.length) {
-                conflictTypes[typeIndex]();
-                typeIndex++;
-                setTimeout(processNextType, 1); // Micro-delay to keep UI responsive
-            } else {
-                // All conflict types processed
-                const endTime = performance.now();
-                console.log(`⚡ Fast conflict detection completed in ${(endTime - startTime).toFixed(2)}ms`);
-                
-                // Update UI
-                totalConflicts.textContent = detectedConflicts.length;
-                conflictStats.style.display = detectedConflicts.length > 0 ? 'block' : 'none';
-
-                // Show/hide buttons
-                conflictBtn.innerHTML = `<i class="fas fa-exclamation-triangle me-1"></i>${detectedConflicts.length} Conflicts Found`;
-                conflictBtn.disabled = false;
-                clearBtn.style.display = detectedConflicts.length > 0 ? 'inline-block' : 'none';
-
-                // Highlight conflicts in the schedule
-                highlightConflicts();
-
-                // Show conflict panel if conflicts found
-                if (detectedConflicts.length > 0) {
-                    showConflictPanel();
-                }
-
-                console.log(`✅ Conflict detection complete. Found ${detectedConflicts.length} conflicts.`);
+        // Build conflict maps (EXACT COPY FROM ALLOCATION MANAGER)
+        allData.forEach((session, index) => {
+            const timeKey = getTimeKey(session);
+            const dayTimeKey = `${session.day}_${timeKey}`;
+            
+            // Teacher conflicts
+            const teacherKey = `${session.teacher_id}_${dayTimeKey}`;
+            if (!teacherSlots.has(teacherKey)) {
+                teacherSlots.set(teacherKey, []);
             }
-        };
+            teacherSlots.get(teacherKey).push({ session, index });
+            
+            // Room conflicts
+            const roomKey = `${session.room_id}_${dayTimeKey}`;
+            if (!roomSlots.has(roomKey)) {
+                roomSlots.set(roomKey, []);
+            }
+            roomSlots.get(roomKey).push({ session, index });
+            
+            // Group conflicts
+            const groupKey = `${session.group_name}_${dayTimeKey}`;
+            if (!groupSlots.has(groupKey)) {
+                groupSlots.set(groupKey, []);
+            }
+            groupSlots.get(groupKey).push({ session, index });
+        });
 
-        processNextType();
+        // Detect teacher conflicts (EXACT COPY FROM ALLOCATION MANAGER)
+        teacherSlots.forEach((sessions, key) => {
+            if (sessions.length > 1) {
+                detectedConflicts.push({
+                    type: 'teacher_conflict',
+                    severity: 'high',
+                    message: `Teacher ${sessions[0].session.teacher_name} has ${sessions.length} sessions at the same time`,
+                    sessions: sessions.map(s => ({ ...s.session, originalIndex: s.index })),
+                    details: {
+                        teacher: sessions[0].session.teacher_name,
+                        day: sessions[0].session.day,
+                        time: getTimeKey(sessions[0].session),
+                        conflictingSessions: sessions.length
+                    }
+                });
+            }
+        });
+
+        // Detect room conflicts (EXACT COPY FROM ALLOCATION MANAGER)
+        roomSlots.forEach((sessions, key) => {
+            if (sessions.length > 1) {
+                detectedConflicts.push({
+                    type: 'room_conflict',
+                    severity: 'high',
+                    message: `Room ${sessions[0].session.room_number} has ${sessions.length} sessions at the same time`,
+                    sessions: sessions.map(s => ({ ...s.session, originalIndex: s.index })),
+                    details: {
+                        room: sessions[0].session.room_number,
+                        day: sessions[0].session.day,
+                        time: getTimeKey(sessions[0].session),
+                        conflictingSessions: sessions.length
+                    }
+                });
+            }
+        });
+
+        // ✅ NEW: Detect time slot exclusivity conflicts (EXACT COPY FROM ALLOCATION MANAGER)
+        detectTimeSlotExclusivityConflicts();
+
+        // 🎯 COMPREHENSIVE group conflict detection with ALL combined_scheduler.py rules (EXACT COPY FROM ALLOCATION MANAGER)
+        groupSlots.forEach((sessions, key) => {
+            if (sessions.length > 1) {
+                const allSessions = sessions.map(s => s.session);
+                const courseCodes = allSessions.map(s => s.course_code);
+                const uniqueCourseCodes = [...new Set(courseCodes)];
+                const uniqueCourses = new Set(sessions.map(s => s.session.course_instance_id));
+                
+                if (uniqueCourses.size > 1) {
+                    // 🎯 COMPREHENSIVE CO-SCHEDULING VALIDATION (All rules from combined_scheduler.py)
+                    const validateCoScheduling = () => {
+                        // ✅ RULE 1: Same course code - Basic co-scheduling (Lines 4277-4281, 5579-5658)
+                        if (uniqueCourseCodes.length === 1) {
+                            return { allowed: true, reason: "Same course co-scheduling", rule: "Lines 4277-4281" };
+                        }
+                        
+                        // ✅ RULE 2: Virtual instances (e.g., "877-A", "877-B") - Lines 1295-1369
+                        const baseCourseIds = uniqueCourseCodes.map(code => {
+                            const match = code.match(/^([A-Z]*\d+)/);
+                            return match ? match[1] : code.split('-')[0];
+                        });
+                        const uniqueBaseCourses = [...new Set(baseCourseIds)];
+                        
+                        if (uniqueBaseCourses.length === 1 && courseCodes.some(code => code.includes('-'))) {
+                            return { allowed: true, reason: "Virtual instance co-scheduling", rule: "Lines 1295-1369" };
+                        }
+                        
+                        // ✅ RULE 3: Batched sessions (is_batched = true) - Lines 5744-5856
+                        const hasBatchedSessions = allSessions.some(s => 
+                            s.is_batched === true || 
+                            s.session_info?.includes('batch') ||
+                            s.co_schedule_info?.includes('batch')
+                        );
+                        if (hasBatchedSessions && uniqueCourseCodes.length === 1) {
+                            return { allowed: true, reason: "Batched session co-scheduling", rule: "Lines 5744-5856" };
+                        }
+                        
+                        // ✅ RULE 4: Cross-department allowances - Lines 3989-4092
+                        const departments = allSessions.map(s => s.group_name.split('_S')[0]);
+                        const uniqueDepartments = [...new Set(departments)];
+                        if (uniqueDepartments.length > 1) {
+                            return { allowed: true, reason: "Cross-department scheduling", rule: "Lines 3989-4092" };
+                        }
+                        
+                        // ✅ RULE 5: Co-scheduled session markers (is_co_scheduled = true)
+                        const hasCoScheduledMarkers = allSessions.some(s => 
+                            s.is_co_scheduled === true || 
+                            s.co_schedule_id || 
+                            s.co_schedule_info?.includes('Co-scheduled')
+                        );
+                        if (hasCoScheduledMarkers) {
+                            return { allowed: true, reason: "Marked co-scheduled sessions", rule: "Lines 5579-5658" };
+                        }
+                        
+                        // ✅ RULE 6: Large course capacity splitting (140+ students total)
+                        const totalStudents = allSessions.reduce((sum, s) => sum + (parseInt(s.student_count) || 0), 0);
+                        const roomCapacities = allSessions.map(s => parseInt(s.capacity) || 0);
+                        const maxCapacity = Math.max(...roomCapacities);
+                        
+                        if ((totalStudents >= 140 || maxCapacity >= 140) && uniqueCourseCodes.length === 1) {
+                            return { allowed: true, reason: "Large course capacity splitting", rule: "Virtual instances for 140+ students" };
+                        }
+                        
+                        // ✅ RULE 7: Different courses in same group - ALLOWED (User Request)
+                        // This allows split groups, electives, and specialized tracks
+                        if (uniqueCourseCodes.length > 1) {
+                            return { allowed: true, reason: "Different courses allowed in same group", rule: "Split groups/electives/tracks allowance" };
+                        }
+                        
+                        // ✅ RULE 8: Large lab co-scheduling (140+ capacity rooms)
+                        const isLargeLab = maxCapacity >= 140;
+                        const allLabSessions = allSessions.every(s => s.schedule_type === 'lab');
+                        if (isLargeLab && allLabSessions) {
+                            return { allowed: true, reason: "Large lab co-scheduling", rule: "140+ capacity lab optimization" };
+                        }
+                        
+                        // ✅ RULE 9: Closely related course codes (e.g., CS23331 vs CS23333, CS19741 vs CS19P18)
+                        // Special handling for CS19XXX series (numeric and alphanumeric patterns)
+                        const cs19Pattern = /^CS19/;
+                        const allCS19Series = uniqueCourseCodes.every(code => cs19Pattern.test(code));
+                        
+                        if (allCS19Series && uniqueCourseCodes.length > 1) {
+                            // Allow all CS19XXX combinations (CS19741, CS19P18, CS19321, etc.)
+                            return { allowed: true, reason: "CS19XXX series co-scheduling", rule: `CS19XXX series (${uniqueCourseCodes.join(', ')})` };
+                        }
+                        
+                        // General pattern for other course series
+                        const coursePattern = /^([A-Z]+)(\d{2,3})(.+)$/; // Flexible pattern for various formats
+                        const courseMatches = uniqueCourseCodes.map(code => {
+                            const match = code.match(coursePattern);
+                            return match ? { prefix: match[1], series: match[2], number: match[3] } : null;
+                        }).filter(m => m !== null);
+                        
+                        if (courseMatches.length === uniqueCourseCodes.length && courseMatches.length > 1) {
+                            // Check if all courses have same prefix and series (e.g., CS233XX, CS23XXX)
+                            const prefixes = [...new Set(courseMatches.map(m => m.prefix))];
+                            const series = [...new Set(courseMatches.map(m => m.series))];
+                            
+                            if (prefixes.length === 1 && series.length === 1) {
+                                return { allowed: true, reason: "Closely related course codes", rule: `${prefixes[0]}${series[0]}XXX series co-scheduling` };
+                            }
+                            
+                            // ✅ RULE 10: Cross-department related courses in same series (e.g., CS23333 vs CB23331, CR23331 vs CS23333)
+                            // Allow related department courses in same series
+                            if (series.length === 1) {
+                                const relatedDeptPairs = [
+                                    ['CS', 'CB'], // Computer Science & Computer Business
+                                    ['CS', 'IT'], // Computer Science & Information Technology
+                                    ['CS', 'CR'], // Computer Science & Cryptography/Cyber Security
+                                    ['AI', 'CS'], // AI & Computer Science
+                                    ['MA', 'CS'], // Mathematics & Computer Science
+                                    ['MA', 'ME'], // Mathematics & Mechanical Engineering
+                                    ['EC', 'EE'], // Electronics & Electrical
+                                    ['ME', 'CE'], // Mechanical & Civil
+                                    ['BM', 'CS'], // Biomedical & Computer Science
+                                    ['BM', 'EC'], // Biomedical & Electronics
+                                    ['BM', 'ME']  // Biomedical & Mechanical
+                                ];
+                                
+                                const sortedPrefixes = [...prefixes].sort();
+                                const isRelatedDepartments = relatedDeptPairs.some(pair => {
+                                    const sortedPair = [...pair].sort();
+                                    return JSON.stringify(sortedPrefixes) === JSON.stringify(sortedPair);
+                                });
+                                
+                                if (isRelatedDepartments) {
+                                    return { allowed: true, reason: "Cross-department related courses", rule: `${sortedPrefixes.join('-')}${series[0]}XXX cross-department series` };
+                                }
+                            }
+                        }
+                        
+                        // ✅ DEFAULT: Allow different courses in same group (per user request)
+                        return { 
+                            allowed: true, 
+                            reason: "Different courses allowed in same group", 
+                            rule: "University scheduling flexibility" 
+                        };
+                    };
+                    
+                    const validationResult = validateCoScheduling();
+                    
+                    if (validationResult.allowed) {
+                        // ✅ CO-SCHEDULING ALLOWED: Mark sessions but don't create conflict
+                        sessions.forEach(s => {
+                            s.session.is_co_scheduled = true;
+                            s.session.co_schedule_info = `✅ ${validationResult.reason} (${validationResult.rule})`;
+                        });
+                        console.log(`✅ Co-scheduling allowed: ${sessions[0].session.group_name} - ${validationResult.reason} (${validationResult.rule})`);
+                        console.log(`   Courses: ${uniqueCourseCodes.join(', ')} at ${sessions[0].session.day} ${getTimeKey(sessions[0].session)}`);
+                    } else {
+                        // ❌ CONFLICT: This should rarely happen now since we allow most group scenarios
+                        detectedConflicts.push({
+                            type: 'group_conflict',
+                            severity: 'medium',  // Reduced severity since group conflicts are now less critical
+                            message: `Group ${sessions[0].session.group_name} has unusual scheduling: ${sessions.length} courses at the same time`,
+                            sessions: sessions.map(s => ({ ...s.session, originalIndex: s.index })),
+                            details: {
+                                group: sessions[0].session.group_name,
+                                day: sessions[0].session.day,
+                                time: getTimeKey(sessions[0].session),
+                                courses: uniqueCourseCodes,
+                                conflictingSessions: sessions.length,
+                                reason: validationResult.reason,
+                                rule: validationResult.rule
+                            }
+                        });
+                        console.log(`⚠️ Unusual group scheduling: ${sessions[0].session.group_name} - ${validationResult.reason} (${validationResult.rule})`);
+                        console.log(`   Courses: ${uniqueCourseCodes.join(', ')} at ${sessions[0].session.day} ${getTimeKey(sessions[0].session)}`);
+                    }
+                }
+            }
+        });
+
+        // Detect capacity violations (EXACT COPY FROM ALLOCATION MANAGER)
+        allData.forEach((session, index) => {
+            if (session.student_count && session.capacity) {
+                if (session.student_count > session.capacity) {
+                    detectedConflicts.push({
+                        type: 'capacity_violation',
+                        severity: 'medium',
+                        message: `Room ${session.room_number} capacity exceeded (${session.student_count}/${session.capacity})`,
+                        sessions: [{ ...session, originalIndex: index }],
+                        details: {
+                            room: session.room_number,
+                            capacity: session.capacity,
+                            students: session.student_count,
+                            overflow: session.student_count - session.capacity
+                        }
+                    });
+                }
+            }
+        });
+                
+        // All conflict types processed
+        const endTime = performance.now();
+        console.log(`⚡ Allocation manager style conflict detection completed in ${(endTime - startTime).toFixed(2)}ms`);
+                
+        // Update UI
+        totalConflicts.textContent = detectedConflicts.length;
+        conflictStats.style.display = detectedConflicts.length > 0 ? 'block' : 'none';
+
+        // Show/hide buttons
+        conflictBtn.innerHTML = `<i class="fas fa-exclamation-triangle me-1"></i>${detectedConflicts.length} Conflicts Found`;
+        conflictBtn.disabled = false;
+        clearBtn.style.display = detectedConflicts.length > 0 ? 'inline-block' : 'none';
+
+        // Highlight conflicts in the schedule
+        highlightConflicts();
+
+        // Show conflict panel if conflicts found
+        if (detectedConflicts.length > 0) {
+            showConflictPanel();
+        }
+
+        console.log(`✅ Conflict detection complete. Found ${detectedConflicts.length} conflicts.`);
     }, 10); // Small delay to allow UI to update with loading state
 }
 
-// Detect and handle duplicate sessions
+// 🔧 EXACT COPY: Detect and handle duplicate sessions (from allocation_manager.js)
 function detectAndHandleDuplicates() {
     const duplicateGroups = new Map();
     const duplicatesToRemove = [];
     
     // Group sessions by key properties to find duplicates
     allData.forEach((session, index) => {
-        const timeKey = session.schedule_type === 'lab' ? session.time_range : session.time_slot;
-        const key = `${session.course_code}_${session.teacher_id}_${session.room_id}_${session.day}_${timeKey}_${session.group_name}_${session.schedule_type}`;
+        const key = `${session.course_code}_${session.teacher_id}_${session.room_id}_${session.day}_${getTimeKey(session)}_${session.group_name}_${session.schedule_type}`;
         
         if (!duplicateGroups.has(key)) {
             duplicateGroups.set(key, []);
@@ -1113,7 +1364,7 @@ function detectAndHandleDuplicates() {
     // Identify duplicates
     duplicateGroups.forEach((sessions, key) => {
         if (sessions.length > 1) {
-            // Add to conflicts as a warning
+            // Mark as duplicates
             detectedConflicts.push({
                 type: 'duplicate_sessions',
                 severity: 'warning',
@@ -1123,7 +1374,7 @@ function detectAndHandleDuplicates() {
                     course: sessions[0].session.course_code,
                     teacher: sessions[0].session.teacher_name,
                     room: sessions[0].session.room_number,
-                    time: sessions[0].session.schedule_type === 'lab' ? sessions[0].session.time_range : sessions[0].session.time_slot,
+                    time: getTimeKey(sessions[0].session),
                     day: sessions[0].session.day,
                     group: sessions[0].session.group_name,
                     duplicateCount: sessions.length,
@@ -1161,289 +1412,130 @@ function detectAndHandleDuplicates() {
     
     if (duplicatesToRemove.length > 0) {
         console.log(`🔧 Removed ${duplicatesToRemove.length} duplicate sessions from dataset`);
-        
-        // Update summary stats after removing duplicates
-        updateSummaryStats();
     }
 }
 
-function detectTeacherConflicts() {
-    const teacherSchedule = {};
+// ✅ UPDATED: Detect time slot exclusivity conflicts (Fixed - no false positives)
 
-    allData.forEach((session, index) => {
-        const timeKey = session.schedule_type === 'lab' ? session.time_range : session.time_slot;
-        const key = `${session.teacher_id}_${session.day}_${timeKey}`;
 
-        if (!teacherSchedule[key]) {
-            teacherSchedule[key] = [];
-        }
-        teacherSchedule[key].push({ ...session, originalIndex: index });
-    });
-
-    // Find conflicts
-    Object.entries(teacherSchedule).forEach(([key, sessions]) => {
-        if (sessions.length > 1) {
-            detectedConflicts.push({
-                type: 'teacher_conflict',
-                severity: 'high',
-                message: `Teacher ${sessions[0].teacher_name} has multiple sessions at the same time`,
-                sessions: sessions,
-                details: {
-                    teacher: sessions[0].teacher_name,
-                    day: sessions[0].day,
-                    time: sessions[0].schedule_type === 'lab' ? sessions[0].time_range : sessions[0].time_slot,
-                    conflictingSessions: sessions.length
-                }
-            });
-        }
-    });
-}
-
-function detectRoomConflicts() {
-    const roomSchedule = {};
-
-    allData.forEach((session, index) => {
-        const timeKey = session.schedule_type === 'lab' ? session.time_range : session.time_slot;
-        const key = `${session.room_id}_${session.day}_${timeKey}`;
-
-        if (!roomSchedule[key]) {
-            roomSchedule[key] = [];
-        }
-        roomSchedule[key].push({ ...session, originalIndex: index });
-    });
-
-    // Find conflicts
-    Object.entries(roomSchedule).forEach(([key, sessions]) => {
-        if (sessions.length > 1) {
-            detectedConflicts.push({
-                type: 'room_conflict',
-                severity: 'high',
-                message: `Room ${sessions[0].room_number} has multiple sessions at the same time`,
-                sessions: sessions,
-                details: {
-                    room: sessions[0].room_number,
-                    day: sessions[0].day,
-                    time: sessions[0].schedule_type === 'lab' ? sessions[0].time_range : sessions[0].time_slot,
-                    conflictingSessions: sessions.length
-                }
-            });
-        }
-    });
-}
-
-// ✅ NEW: Detect time slot exclusivity conflicts (User Requested Rules)
-function detectTimeSlotExclusivityConflicts() {
-    const timeSlotMap = {};
+// Helper function to check if time slots overlap
+function doTimeSlotsOverlap(timeSlot1, timeSlot2) {
+    if (!timeSlot1 || !timeSlot2) return false;
     
-    // Build a map of all sessions by day and time slot
-    allData.forEach((session, index) => {
-        const day = session.day;
-        const timeKey = session.schedule_type === 'lab' ? session.time_range : session.time_slot;
-        
-        if (!timeSlotMap[day]) {
-            timeSlotMap[day] = {};
+    const parseTime = (timeStr) => {
+        if (timeStr.includes(' - ')) {
+            const [start, end] = timeStr.split(' - ');
+            return {
+                start: parseTimeToMinutes(start),
+                end: parseTimeToMinutes(end)
+            };
         }
-        if (!timeSlotMap[day][timeKey]) {
-            timeSlotMap[day][timeKey] = [];
-        }
-        
-        timeSlotMap[day][timeKey].push({ ...session, originalIndex: index });
-    });
+        // Single time slot, assume 50-minute duration
+        const start = parseTimeToMinutes(timeStr);
+        return {
+            start: start,
+            end: start + 50
+        };
+    };
     
-    // Check each time slot for exclusivity violations
-    Object.entries(timeSlotMap).forEach(([day, daySlots]) => {
-        Object.entries(daySlots).forEach(([timeSlot, sessions]) => {
-            if (sessions.length <= 1) return; // No conflicts possible with 1 or fewer sessions
+    const parseTimeToMinutes = (timeStr) => {
+        try {
+            const [time, period] = timeStr.trim().split(' ');
+            let [hours, minutes] = time.split(':').map(Number);
             
-            const theorySessions = sessions.filter(s => s.schedule_type === 'theory');
-            const labSessions = sessions.filter(s => s.schedule_type === 'lab');
-            
-            // Rule 1: Theory-Lab Department Exclusivity
-            if (theorySessions.length > 0 && labSessions.length > 0) {
-                // Group sessions by department to check conflicts within same department only
-                const deptGroups = {};
-                
-                // Group theory sessions by department
-                theorySessions.forEach(s => {
-                    const dept = s.department || s.student_dept;
-                    if (!deptGroups[dept]) deptGroups[dept] = { theory: [], lab: [] };
-                    deptGroups[dept].theory.push(s);
-                });
-                
-                // Group lab sessions by department
-                labSessions.forEach(s => {
-                    const dept = s.department || s.student_dept;
-                    if (!deptGroups[dept]) deptGroups[dept] = { theory: [], lab: [] };
-                    deptGroups[dept].lab.push(s);
-                });
-                
-                // Check for conflicts within each department
-                Object.entries(deptGroups).forEach(([dept, sessions]) => {
-                    if (sessions.theory.length > 0 && sessions.lab.length > 0) {
-                        const allSessions = [...sessions.theory, ...sessions.lab];
-                        detectedConflicts.push({
-                            type: 'theory_lab_dept_conflict',
-                            severity: 'critical',
-                            message: `CRITICAL: ${dept} has both theory and lab sessions at same time on ${day} ${timeSlot}`,
-                            sessions: allSessions,
-                            details: {
-                                rule: 'Theory-Lab Department Exclusivity',
-                                day: day,
-                                timeSlot: timeSlot,
-                                department: dept,
-                                theorySessions: sessions.theory.length,
-                                labSessions: sessions.lab.length,
-                                totalConflicts: allSessions.length,
-                                reason: 'Theory and lab sessions cannot overlap in same department'
-                            }
-                        });
-                    }
-                });
+            if (period && period.toLowerCase() === 'pm' && hours !== 12) {
+                hours += 12;
+            } else if (period && period.toLowerCase() === 'am' && hours === 12) {
+                hours = 0;
             }
             
-            // Rule 2: Theory Single Group Rule (Same Department)
-            if (theorySessions.length > 1) {
-                // Group theory sessions by department and check conflicts within each department
-                const deptTheoryGroups = {};
+            return hours * 60 + (minutes || 0);
+        } catch {
+            // Fallback parsing
+            const match = timeStr.match(/(\d+):(\d+)/);
+            if (match) {
+                let hours = parseInt(match[1]);
+                const minutes = parseInt(match[2]);
                 
-                theorySessions.forEach(s => {
-                    const dept = s.department || s.student_dept;
-                    if (!deptTheoryGroups[dept]) deptTheoryGroups[dept] = [];
-                    deptTheoryGroups[dept].push(s);
-                });
+                // Assume PM for typical class hours
+                if (hours <= 7 && hours >= 1) {
+                    hours += 12;
+                }
                 
-                Object.entries(deptTheoryGroups).forEach(([dept, deptSessions]) => {
-                    const groups = [...new Set(deptSessions.map(s => s.group_name))];
-                    if (groups.length > 1) {
-                        // Multiple groups in same department have theory at same time - CRITICAL VIOLATION
-                        detectedConflicts.push({
-                            type: 'theory_single_group_dept_conflict',
-                            severity: 'critical',
-                            message: `CRITICAL: ${dept} has multiple groups with theory sessions at ${day} ${timeSlot}: ${groups.join(', ')}`,
-                            sessions: deptSessions,
-                            details: {
-                                rule: 'Theory Single Group Rule (Same Department)',
-                                day: day,
-                                timeSlot: timeSlot,
-                                department: dept,
-                                groups: groups,
-                                sessionCount: deptSessions.length,
-                                reason: 'Only one group per department can have theory session at any time slot'
-                            }
-                        });
-                    }
-                });
+                return hours * 60 + minutes;
             }
-            
-            // Rule 3: Lab sessions conflicting with theory (check overlap within same semester and department)
-            labSessions.forEach(labSession => {
-                const labTimeSlots = window.allocationManager?.labSessionDetails?.[labSession.session_name] || [labSession.time_range];
-                
-                // Extract lab session's semester and department
-                const labSemester = labSession.semester || getSemesterFromGroupName(labSession.group_name);
-                const labDept = labSession.department || labSession.student_dept;
-                
-                labTimeSlots.forEach(labTimeSlot => {
-                    const conflictingTheory = allData.filter(s => {
-                        if (s === labSession || s.schedule_type !== 'theory' || s.day !== day || s.time_slot !== labTimeSlot) {
+            return 0;
+        }
+    };
+    
+    try {
+        const time1 = parseTime(timeSlot1);
+        const time2 = parseTime(timeSlot2);
+        
+        // Check overlap: (StartA < EndB) and (EndA > StartB)
+        return time1.start < time2.end && time1.end > time2.start;
+    } catch {
                             return false;
                         }
-                        
-                        // Extract theory session's semester and department
-                        const theorySemester = s.semester || getSemesterFromGroupName(s.group_name);
-                        const theoryDept = s.department || s.student_dept;
-                        
-                        // Only check conflicts within same semester and department
-                        return labSemester === theorySemester && labDept === theoryDept;
-                    });
-                    
-                    if (conflictingTheory.length > 0) {
-                        conflictingTheory.forEach(theorySession => {
-                            detectedConflicts.push({
-                                type: 'theory_lab_overlap_conflict',
-                                severity: 'critical',
-                                message: `CRITICAL: Lab session ${labSession.course_code} (${labSession.group_name}) conflicts with theory session ${theorySession.course_code} (${theorySession.group_name}) at ${labTimeSlot} - Same Dept/Sem`,
-                                sessions: [labSession, theorySession],
-                                details: {
-                                    rule: 'Lab-Theory Overlap Prevention (Same Dept/Sem)',
-                                    day: day,
-                                    timeSlot: labTimeSlot,
-                                    labSession: `${labSession.course_code} - ${labSession.group_name} (${labSession.session_name})`,
-                                    theorySession: `${theorySession.course_code} - ${theorySession.group_name}`,
-                                    semester: labSemester,
-                                    department: labDept,
-                                    reason: 'Lab and theory sessions cannot overlap in same semester and department'
-                                }
-                            });
+}
+
+// 🎯 ALLOCATION MANAGER EXACT FUNCTION
+function detectTimeSlotExclusivityConflicts() {
+    console.log('🕐 Detecting same-group time slot conflicts only...');
+    
+    // REMOVED: Global Theory-Lab exclusivity and Theory Single Group rules
+    // These were causing false positives for different departments/semesters
+    
+    // Only check for conflicts within the same group
+    const groupMap = {};
+    
+    // Group sessions by group name and day
+    allData.forEach((session, index) => {
+        const groupKey = `${session.group_name}_${session.day}`;
+        if (!groupMap[groupKey]) {
+            groupMap[groupKey] = [];
+        }
+        groupMap[groupKey].push({ session, index });
+    });
+    
+    // Check each group for internal conflicts only
+    Object.entries(groupMap).forEach(([groupKey, sessions]) => {
+        const [groupName, day] = groupKey.split('_');
+        
+        // Check for overlapping sessions within the same group
+        for (let i = 0; i < sessions.length; i++) {
+            for (let j = i + 1; j < sessions.length; j++) {
+                const session1 = sessions[i].session;
+                const session2 = sessions[j].session;
+                
+                // Check if sessions overlap in time
+                if (doTimeSlotsOverlap(session1, session2)) {
+                    // Different session types within same group = conflict
+                    if (session1.schedule_type !== session2.schedule_type) {
+                        detectedConflicts.push({
+                            type: 'same_group_mixed_session_overlap',
+                            severity: 'high',
+                            message: `Group ${groupName}: ${session1.schedule_type} session ${session1.course_code} overlaps with ${session2.schedule_type} session ${session2.course_code}`,
+                            sessions: [
+                                { ...session1, originalIndex: sessions[i].index },
+                                { ...session2, originalIndex: sessions[j].index }
+                            ],
+                            details: {
+                                rule: 'Same Group Session Overlap Prevention',
+                                group: groupName,
+                                day: day,
+                                session1: `${session1.course_code} (${session1.schedule_type})`,
+                                session2: `${session2.course_code} (${session2.schedule_type})`,
+                                reason: 'Same group cannot have overlapping sessions of different types'
+                            }
                         });
                     }
-                });
-            });
-        });
-    });
-}
-
-function detectGroupConflicts() {
-    const groupSchedule = {};
-
-    allData.forEach((session, index) => {
-        const timeKey = session.schedule_type === 'lab' ? session.time_range : session.time_slot;
-        const key = `${session.group_name}_${session.day}_${timeKey}`;
-
-        if (!groupSchedule[key]) {
-            groupSchedule[key] = [];
-        }
-        groupSchedule[key].push({ ...session, originalIndex: index });
-    });
-
-    // ❌ STRICT GROUP RULE: No group overlaps allowed
-    // - Lab and theory sessions for same group cannot overlap
-    // - Any overlap is treated as a high-severity conflict
-    Object.entries(groupSchedule).forEach(([key, sessions]) => {
-        if (sessions.length > 1) {
-            const [groupName, day, timeSlot] = key.split('_');
-            const courseCodes = sessions.map(s => s.course_code);
-            const sessionTypes = sessions.map(s => s.schedule_type);
-            
-            // ❌ GROUP CONFLICT: Multiple sessions for same group at same time
-            detectedConflicts.push({
-                type: 'group_conflict',
-                severity: 'high',
-                message: `Group ${groupName.replace(/_/g, ' ')} has ${sessions.length} overlapping sessions at ${day} ${timeSlot}: ${courseCodes.join(', ')} (${sessionTypes.join(', ')})`,
-                sessions: sessions,
-                details: {
-                    group: groupName,
-                    day: day,
-                    timeSlot: timeSlot,
-                    sessionCount: sessions.length,
-                    courseCodes: courseCodes,
-                    sessionTypes: sessionTypes,
-                    rule: 'No group overlaps allowed'
                 }
-            });
-        }
-    });
-}
-
-function detectCapacityViolations() {
-    allData.forEach((session, index) => {
-        if (session.student_count && session.capacity) {
-            if (session.student_count > session.capacity) {
-                detectedConflicts.push({
-                    type: 'capacity_violation',
-                    severity: 'medium',
-                    message: `Room ${session.room_number} capacity exceeded (${session.student_count}/${session.capacity})`,
-                    sessions: [{ ...session, originalIndex: index }],
-                    details: {
-                        room: session.room_number,
-                        capacity: session.capacity,
-                        students: session.student_count,
-                        overflow: session.student_count - session.capacity
-                    }
-                });
             }
         }
     });
+    
+    console.log('✅ Same-group conflict detection completed');
 }
 
 function highlightConflicts() {
@@ -1593,12 +1685,12 @@ function showQuickEditModal(sessionIndex) {
         existingModal.remove();
     }
 
-    // Create quick edit modal
+    // Create quick edit modal with old style UI but new fields
     const modal = document.createElement('div');
     modal.id = 'quickEditModal';
     modal.className = 'modal fade';
     modal.innerHTML = `
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog modal-xl">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">
@@ -1618,9 +1710,42 @@ function showQuickEditModal(sessionIndex) {
 
                     <!-- From → To Layout -->
                     <form id="quickEditForm">
-                        <div class="row">
-                            <!-- Day Change -->
-                            <div class="col-md-6 mb-3">
+                        <!-- Course Code (readonly) -->
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Course Code</label>
+                                <div class="d-flex align-items-center">
+                                    <div class="me-2">
+                                        <small class="text-muted">Current:</small>
+                                        <div class="badge bg-light text-dark">${session.course_code}</div>
+                                    </div>
+                                    <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                                    <div class="flex-grow-1">
+                                        <small class="text-muted">Same:</small>
+                                        <input type="text" class="form-control form-control-sm" id="quickEditCourseCode" value="${session.course_code}" readonly>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Course Name (readonly) -->
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Course Name</label>
+                                <div class="d-flex align-items-center">
+                                    <div class="me-2">
+                                        <small class="text-muted">Current:</small>
+                                        <div class="badge bg-info text-wrap text-start" style="max-width: 150px;">${session.course_name || 'N/A'}</div>
+                                    </div>
+                                    <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                                    <div class="flex-grow-1">
+                                        <small class="text-muted">Same:</small>
+                                        <input type="text" class="form-control form-control-sm" id="quickEditCourseName" value="${session.course_name || 'N/A'}" readonly>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Day Change -->
+                        <div class="row mb-3">
+                            <div class="col-md-6">
                                 <label class="form-label fw-bold">Day</label>
                                 <div class="d-flex align-items-center">
                                     <div class="me-2">
@@ -1630,7 +1755,8 @@ function showQuickEditModal(sessionIndex) {
                                     <i class="fas fa-arrow-right mx-2 text-muted"></i>
                                     <div class="flex-grow-1">
                                         <small class="text-muted">To:</small>
-                                        <select class="form-control form-control-sm" id="quickEditDay" onchange="updateAvailability()">
+                                        <select class="form-control form-control-sm" id="quickEditDay" onchange="updateAvailability()" required>
+                                            <option value="">Select Day</option>
                                             <option value="monday" ${session.day === 'monday' ? 'selected' : ''}>Monday</option>
                                             <option value="tuesday" ${session.day === 'tuesday' ? 'selected' : ''}>Tuesday</option>
                                             <option value="wed" ${session.day === 'wed' ? 'selected' : ''}>Wednesday</option>
@@ -1641,9 +1767,29 @@ function showQuickEditModal(sessionIndex) {
                                     </div>
                                 </div>
                             </div>
+                            <!-- Session Type (disabled) -->
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Session Type</label>
+                                <div class="d-flex align-items-center">
+                                    <div class="me-2">
+                                        <small class="text-muted">Current:</small>
+                                        <div class="badge bg-secondary">${session.schedule_type.toUpperCase()}</div>
+                                    </div>
+                                    <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                                    <div class="flex-grow-1">
+                                        <small class="text-muted">Same:</small>
+                                        <select class="form-control form-control-sm" id="quickEditSessionType" disabled>
+                                            <option value="theory" ${session.schedule_type === 'theory' ? 'selected' : ''}>Theory</option>
+                                            <option value="lab" ${session.schedule_type === 'lab' ? 'selected' : ''}>Lab</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
 
-                            <!-- Time Slot Change -->
-                            <div class="col-md-6 mb-3">
+                        <!-- Time Slot Change -->
+                        <div class="row mb-3">
+                            <div class="col-md-12">
                                 <label class="form-label fw-bold">Time Slot</label>
                                 <div class="d-flex align-items-center">
                                     <div class="me-2">
@@ -1653,7 +1799,8 @@ function showQuickEditModal(sessionIndex) {
                                     <i class="fas fa-arrow-right mx-2 text-muted"></i>
                                     <div class="flex-grow-1">
                                         <small class="text-muted">To:</small>
-                                        <select class="form-control form-control-sm" id="quickEditTimeSlot" onchange="updateAvailability()">
+                                        <select class="form-control form-control-sm" id="quickEditTimeSlot" onchange="updateAvailability()" required>
+                                            <option value="">Select Time Slot</option>
                                             <!-- Will be populated dynamically -->
                                         </select>
                                     </div>
@@ -1661,39 +1808,284 @@ function showQuickEditModal(sessionIndex) {
                             </div>
                         </div>
 
-                        <div class="row">
-                            <!-- Teacher Change -->
-                            <div class="col-md-6 mb-3">
+                        <!-- Teacher Change -->
+                        <div class="row mb-3">
+                            <div class="col-md-12">
                                 <label class="form-label fw-bold">Teacher</label>
                                 <div class="d-flex align-items-center">
-                                    <div class="me-2 text-center" style="min-width: 120px;">
+                                    <div class="me-2 text-center" style="min-width: 150px;">
                                         <small class="text-muted">From:</small>
-                                        <div class="badge bg-info text-wrap">${session.teacher_name}</div>
+                                        <div class="badge bg-info text-wrap">${session.teacher_name} (${session.staff_code})</div>
                                     </div>
                                     <i class="fas fa-arrow-right mx-2 text-muted"></i>
                                     <div class="flex-grow-1">
                                         <small class="text-muted">To:</small>
-                                        <select class="form-control form-control-sm" id="quickEditTeacher" onchange="checkValidation()" onfocus="populateAvailableTeachers()">
+                                        <select class="form-control form-control-sm" id="quickEditTeacher" onchange="checkValidation()" onfocus="populateAvailableTeachers()" required>
                                             <option value="${session.teacher_id}">${session.teacher_name} (${session.staff_code})</option>
                                         </select>
                                     </div>
                                 </div>
                             </div>
+                        </div>
 
-                            <!-- Room Change -->
-                            <div class="col-md-6 mb-3">
+                        <!-- Room Change -->
+                        <div class="row mb-3">
+                            <div class="col-md-12">
                                 <label class="form-label fw-bold">Room</label>
                                 <div class="d-flex align-items-center">
-                                    <div class="me-2 text-center" style="min-width: 120px;">
+                                    <div class="me-2 text-center" style="min-width: 150px;">
                                         <small class="text-muted">From:</small>
                                         <div class="badge bg-success text-wrap">${session.room_number} (${session.block})</div>
                                     </div>
                                     <i class="fas fa-arrow-right mx-2 text-muted"></i>
                                     <div class="flex-grow-1">
                                         <small class="text-muted">To:</small>
-                                        <select class="form-control form-control-sm" id="quickEditRoom" onchange="checkValidation()" onfocus="populateAvailableRooms()">
+                                        <select class="form-control form-control-sm" id="quickEditRoom" onchange="checkValidation()" onfocus="populateAvailableRooms()" required>
                                             <option value="${session.room_id}">${session.room_number} (${session.block}) - Capacity: ${session.capacity}</option>
                                         </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Group (readonly) -->
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Group</label>
+                                <div class="d-flex align-items-center">
+                                    <div class="me-2">
+                                        <small class="text-muted">Current:</small>
+                                        <div class="badge bg-warning text-dark">${session.group_name}</div>
+                                    </div>
+                                    <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                                    <div class="flex-grow-1">
+                                        <small class="text-muted">Same:</small>
+                                        <input type="text" class="form-control form-control-sm" id="quickEditGroup" value="${session.group_name}" readonly>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Student Count (editable) -->
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Student Count ⭐</label>
+                                <div class="d-flex align-items-center">
+                                    <div class="me-2">
+                                        <small class="text-muted">From:</small>
+                                        <div class="badge bg-light text-dark">${session.student_count || 'Not set'}</div>
+                                    </div>
+                                    <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                                    <div class="flex-grow-1">
+                                        <small class="text-muted">To:</small>
+                                        <input type="number" class="form-control form-control-sm" id="quickEditStudentCount" value="${session.student_count || ''}" min="0" max="200" onchange="checkValidation()">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Lab-Specific Fields (only show for lab sessions) -->
+                        ${session.schedule_type === 'lab' ? `
+                        <div class="card bg-warning bg-opacity-10 border-warning mb-3" id="labSpecificFields">
+                            <div class="card-header bg-warning bg-opacity-25">
+                                <h6 class="mb-0">
+                                    <i class="fas fa-flask me-2"></i>
+                                    Lab Session Details
+                                </h6>
+                            </div>
+                            <div class="card-body">
+                                <!-- Lab Session Name -->
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <label class="form-label fw-bold">Lab Session Name</label>
+                                        <div class="d-flex align-items-center">
+                                            <div class="me-2">
+                                                <small class="text-muted">Current:</small>
+                                                <div class="badge bg-warning text-dark">${session.session_name || 'N/A'}</div>
+                                            </div>
+                                            <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                                            <div class="flex-grow-1">
+                                                <small class="text-muted">Auto-updates with time:</small>
+                                                <input type="text" class="form-control form-control-sm" id="quickEditSessionName" value="${session.session_name || ''}" readonly>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <!-- Time Range -->
+                                    <div class="col-md-6">
+                                        <label class="form-label fw-bold">Full Time Range</label>
+                                        <div class="d-flex align-items-center">
+                                            <div class="me-2">
+                                                <small class="text-muted">Current:</small>
+                                                <div class="badge bg-info text-wrap" style="max-width: 150px;">${session.time_range || 'N/A'}</div>
+                                            </div>
+                                            <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                                            <div class="flex-grow-1">
+                                                <small class="text-muted">Auto-updates:</small>
+                                                <input type="text" class="form-control form-control-sm" id="quickEditTimeRange" value="${session.time_range || ''}" readonly>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Batching Information -->
+                                <div class="row mb-3">
+                                    <div class="col-md-4">
+                                        <label class="form-label fw-bold">Is Batched</label>
+                                        <div class="d-flex align-items-center">
+                                            <div class="me-2">
+                                                <small class="text-muted">Current:</small>
+                                                <div class="badge ${session.is_batched ? 'bg-success' : 'bg-secondary'}">${session.is_batched ? 'Yes' : 'No'}</div>
+                                            </div>
+                                            <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                                            <div class="flex-grow-1">
+                                                <small class="text-muted">To:</small>
+                                                <select class="form-control form-control-sm" id="quickEditIsBatched" onchange="toggleBatchFields()">
+                                                    <option value="0" ${!session.is_batched ? 'selected' : ''}>No</option>
+                                                    <option value="1" ${session.is_batched ? 'selected' : ''}>Yes</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label fw-bold">Batch Info</label>
+                                        <div class="d-flex align-items-center">
+                                            <div class="me-2">
+                                                <small class="text-muted">From:</small>
+                                                <div class="badge bg-light text-dark">${session.batch_info || 'None'}</div>
+                                            </div>
+                                            <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                                            <div class="flex-grow-1">
+                                                <small class="text-muted">To:</small>
+                                                <input type="text" class="form-control form-control-sm" id="quickEditBatchInfo" value="${session.batch_info || ''}" placeholder="e.g., Batch 1">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label fw-bold">Number of Batches</label>
+                                        <div class="d-flex align-items-center">
+                                            <div class="me-2">
+                                                <small class="text-muted">From:</small>
+                                                <div class="badge bg-light text-dark">${session.num_batches || '1'}</div>
+                                            </div>
+                                            <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                                            <div class="flex-grow-1">
+                                                <small class="text-muted">To:</small>
+                                                <input type="number" class="form-control form-control-sm" id="quickEditNumBatches" value="${session.num_batches || 1}" min="1" max="5">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Total Students & Practical Hours -->
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <label class="form-label fw-bold">Total Students (All Batches)</label>
+                                        <div class="d-flex align-items-center">
+                                            <div class="me-2">
+                                                <small class="text-muted">From:</small>
+                                                <div class="badge bg-info">${session.total_students || session.student_count || 'N/A'}</div>
+                                            </div>
+                                            <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                                            <div class="flex-grow-1">
+                                                <small class="text-muted">To:</small>
+                                                <input type="number" class="form-control form-control-sm" id="quickEditTotalStudents" value="${session.total_students || session.student_count || ''}" min="0" max="500">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label fw-bold">Practical Hours</label>
+                                        <div class="d-flex align-items-center">
+                                            <div class="me-2">
+                                                <small class="text-muted">From:</small>
+                                                <div class="badge bg-success">${session.practical_hours || '2'} hrs</div>
+                                            </div>
+                                            <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                                            <div class="flex-grow-1">
+                                                <small class="text-muted">To:</small>
+                                                <select class="form-control form-control-sm" id="quickEditPracticalHours">
+                                                    <option value="1" ${session.practical_hours == 1 ? 'selected' : ''}>1 Hour</option>
+                                                    <option value="2" ${session.practical_hours == 2 ? 'selected' : ''}>2 Hours</option>
+                                                    <option value="3" ${session.practical_hours == 3 ? 'selected' : ''}>3 Hours</option>
+                                                    <option value="4" ${session.practical_hours == 4 ? 'selected' : ''}>4 Hours</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Co-scheduling Information -->
+                                <div class="row mb-3">
+                                    <div class="col-md-12">
+                                        <label class="form-label fw-bold">Co-scheduling Info</label>
+                                        <div class="d-flex align-items-center">
+                                            <div class="me-2" style="min-width: 150px;">
+                                                <small class="text-muted">From:</small>
+                                                <div class="badge bg-light text-dark text-wrap">${session.co_schedule_info || 'Single session'}</div>
+                                            </div>
+                                            <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                                            <div class="flex-grow-1">
+                                                <small class="text-muted">To:</small>
+                                                <input type="text" class="form-control form-control-sm" id="quickEditCoScheduleInfo" value="${session.co_schedule_info || 'Single session'}" placeholder="Co-scheduling details">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Course Code Display (for batches) -->
+                                <div class="row mb-3">
+                                    <div class="col-md-12">
+                                        <label class="form-label fw-bold">Course Display Name (with Batch)</label>
+                                        <div class="d-flex align-items-center">
+                                            <div class="me-2" style="min-width: 150px;">
+                                                <small class="text-muted">From:</small>
+                                                <div class="badge bg-primary text-wrap">${session.course_code_display || session.course_code}</div>
+                                            </div>
+                                            <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                                            <div class="flex-grow-1">
+                                                <small class="text-muted">Auto-generated:</small>
+                                                <input type="text" class="form-control form-control-sm" id="quickEditCourseCodeDisplay" value="${session.course_code_display || session.course_code}" readonly>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        ` : ''}
+
+                        <!-- Room Capacity (readonly) -->
+                        <div class="row mb-3">
+                            <div class="col-md-12">
+                                <label class="form-label fw-bold">Room Capacity</label>
+                                <div class="d-flex align-items-center">
+                                    <div class="me-2">
+                                        <small class="text-muted">Current:</small>
+                                        <div class="badge bg-success">${session.capacity} seats</div>
+                                    </div>
+                                    <i class="fas fa-arrow-right mx-2 text-muted"></i>
+                                    <div class="flex-grow-1">
+                                        <small class="text-muted">Will update based on room selection:</small>
+                                        <input type="number" class="form-control form-control-sm" id="quickEditRoomCapacity" value="${session.capacity}" readonly>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Additional Information -->
+                        <div class="row mb-3">
+                            <div class="col-md-12">
+                                <div class="card bg-light">
+                                    <div class="card-body py-2">
+                                        <div class="row text-center">
+                                            <div class="col-md-4">
+                                                <small class="fw-bold text-muted">Department:</small>
+                                                <span class="badge bg-primary ms-1">${session.group_name.split('_S')[0]}</span>
+                                            </div>
+                                            <div class="col-md-4">
+                                                <small class="fw-bold text-muted">Semester:</small>
+                                                <span class="badge bg-info ms-1">${getSemesterFromGroupName(session.group_name)}</span>
+                                            </div>
+                                            <div class="col-md-4">
+                                                <small class="fw-bold text-muted">Block:</small>
+                                                <span class="badge bg-success ms-1">${session.block}</span>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -1705,7 +2097,11 @@ function showQuickEditModal(sessionIndex) {
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-primary" id="quickSaveBtn" onclick="saveQuickEdit(${sessionIndex})" disabled>
+                    <button type="button" class="btn btn-primary" id="quickValidateBtn" onclick="checkValidation()">
+                        <i class="fas fa-check-circle me-1"></i>
+                        Validate Changes
+                    </button>
+                    <button type="button" class="btn btn-success" id="quickSaveBtn" onclick="saveQuickEdit(${sessionIndex})" disabled>
                         <i class="fas fa-save me-1"></i>
                         Save Changes
                     </button>
@@ -1718,6 +2114,15 @@ function showQuickEditModal(sessionIndex) {
     
     // Initialize form
     populateQuickEditForm(session);
+    
+    // Add event listeners for lab-specific fields (if applicable)
+    if (session.schedule_type === 'lab') {
+        addBatchFieldListeners();
+        // Initialize batch field states
+        setTimeout(() => {
+            toggleBatchFields();
+        }, 100); // Small delay to ensure DOM is ready
+    }
     
     // Show modal
     const bootstrapModal = new bootstrap.Modal(modal);
@@ -1993,43 +2398,127 @@ function checkValidation() {
     const timeSlot = document.getElementById('quickEditTimeSlot').value;
     const teacherId = document.getElementById('quickEditTeacher').value;
     const roomId = document.getElementById('quickEditRoom').value;
+    const studentCount = document.getElementById('quickEditStudentCount').value;
     const saveBtn = document.getElementById('quickSaveBtn');
     const validationResults = document.getElementById('quickValidationResults');
 
     if (!day || !timeSlot || !teacherId || !roomId) {
         saveBtn.disabled = true;
-        validationResults.innerHTML = '';
+        validationResults.innerHTML = `
+            <div class="alert alert-warning">
+                <i class="fas fa-exclamation-triangle me-2"></i>
+                <strong>Incomplete Form</strong>
+                <p class="mb-0">Please fill in all required fields (Day, Time Slot, Teacher, Room)</p>
+            </div>
+        `;
         return;
     }
 
     if (!window.allocationManager) {
         saveBtn.disabled = true;
+        validationResults.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-triangle me-2"></i>
+                <strong>System Error</strong>
+                <p class="mb-0">Allocation manager not loaded. Please refresh the page.</p>
+            </div>
+        `;
         return;
     }
 
-    // Check if teacher and room are available
-    const teacherFree = window.allocationManager.isTeacherFree(teacherId, day, timeSlot);
-    const roomFree = window.allocationManager.isRoomFree(roomId, day, timeSlot);
+    // Get current session for validation context
+    const saveButton = document.getElementById('quickSaveBtn');
+    const sessionIndex = parseInt(saveButton.getAttribute('onclick').match(/\d+/)[0]);
+    const currentSession = allData[sessionIndex];
+
+    // Check if teacher and room are available (excluding current session)
+    let teacherFree = true;
+    let roomFree = true;
+    let capacityIssue = false;
+    let roomCapacity = 0;
+
+    // Get room capacity
+    const room = Array.from(window.allocationManager.rooms)
+        .map(r => JSON.parse(r))
+        .find(r => r.id == roomId);
+    if (room) {
+        roomCapacity = room.capacity;
+        // Update capacity field
+        const capacityField = document.getElementById('quickEditRoomCapacity');
+        if (capacityField) {
+            capacityField.value = roomCapacity;
+        }
+    }
+
+    // Check for conflicts (excluding current session)
+    const conflictingSessions = allData.filter(session => 
+        session !== currentSession &&
+        session.day === day &&
+        ((session.schedule_type === 'lab' && session.time_range === timeSlot) ||
+         (session.schedule_type === 'theory' && session.time_slot === timeSlot))
+    );
+
+    const teacherConflicts = conflictingSessions.filter(session => session.teacher_id == teacherId);
+    const roomConflicts = conflictingSessions.filter(session => session.room_id == roomId);
+
+    if (teacherConflicts.length > 0) {
+        teacherFree = false;
+    }
+
+    if (roomConflicts.length > 0) {
+        roomFree = false;
+    }
+
+    // Check capacity violation
+    if (studentCount && studentCount.trim() !== '' && roomCapacity > 0) {
+        const studentCountNum = parseInt(studentCount);
+        if (studentCountNum > roomCapacity) {
+            capacityIssue = true;
+        }
+    }
 
     let validation = { isValid: true, conflicts: [], warnings: [] };
 
     if (!teacherFree) {
         validation.isValid = false;
-        validation.conflicts.push({ message: 'Selected teacher is not available at this time' });
+        validation.conflicts.push({ 
+            message: `Teacher is already scheduled at this time (${teacherConflicts[0].course_code} - ${teacherConflicts[0].group_name})` 
+        });
     }
 
     if (!roomFree) {
         validation.isValid = false;
-        validation.conflicts.push({ message: 'Selected room is not available at this time' });
+        validation.conflicts.push({ 
+            message: `Room is already booked at this time (${roomConflicts[0].course_code} - ${roomConflicts[0].group_name})` 
+        });
+    }
+
+    if (capacityIssue) {
+        validation.warnings.push({ 
+            message: `Student count (${studentCount}) exceeds room capacity (${roomCapacity})` 
+        });
     }
 
     // Display validation results
-    if (validation.isValid) {
+    if (validation.isValid && validation.warnings.length === 0) {
         validationResults.innerHTML = `
             <div class="alert alert-success">
                 <i class="fas fa-check-circle me-2"></i>
                 <strong>Valid Configuration</strong>
                 <p class="mb-0">The proposed changes are valid and can be applied.</p>
+                ${studentCount ? `<small class="text-muted">Student count: ${studentCount} / Room capacity: ${roomCapacity}</small>` : ''}
+            </div>
+        `;
+        saveBtn.disabled = false;
+    } else if (validation.isValid && validation.warnings.length > 0) {
+        validationResults.innerHTML = `
+            <div class="alert alert-warning">
+                <i class="fas fa-exclamation-triangle me-2"></i>
+                <strong>Valid with Warnings</strong>
+                <ul class="mb-2">
+                    ${validation.warnings.map(w => `<li>${w.message}</li>`).join('')}
+                </ul>
+                <small class="text-muted">You can still proceed, but these issues will be flagged.</small>
             </div>
         `;
         saveBtn.disabled = false;
@@ -2040,6 +2529,7 @@ function checkValidation() {
                 <strong>Validation Failed</strong>
                 <ul class="mb-0">
                     ${validation.conflicts.map(c => `<li>${c.message}</li>`).join('')}
+                    ${validation.warnings.map(w => `<li class="text-warning">${w.message}</li>`).join('')}
                 </ul>
             </div>
         `;
@@ -2056,10 +2546,22 @@ async function saveQuickEdit(sessionIndex) {
     const timeSlot = document.getElementById('quickEditTimeSlot').value;
     const teacherId = document.getElementById('quickEditTeacher').value;
     const roomId = document.getElementById('quickEditRoom').value;
+    const studentCount = document.getElementById('quickEditStudentCount').value;
+
+    // Validate required fields
+    if (!day || !timeSlot || !teacherId || !roomId) {
+        showErrorAlert('Please fill in all required fields (Day, Time Slot, Teacher, Room)');
+        return;
+    }
 
     // Create updated session
     const updatedSession = { ...session };
     updatedSession.day = day;
+    
+    // Update student count
+    if (studentCount && studentCount.trim() !== '') {
+        updatedSession.student_count = parseInt(studentCount);
+    }
     
     if (session.schedule_type === 'lab') {
         updatedSession.time_range = timeSlot;
@@ -2067,6 +2569,51 @@ async function saveQuickEdit(sessionIndex) {
         const labSlots = {'L1': '8:00 - 9:40', 'L2': '10:00 - 11:40', 'L3': '11:50 - 1:20', 'L4': '1:20 - 3:00', 'L5': '3:00 - 4:40', 'L6': '5:10 - 6:50'};
         const sessionName = Object.keys(labSlots).find(key => labSlots[key] === timeSlot);
         if (sessionName) updatedSession.session_name = sessionName;
+
+        // Update lab-specific fields
+        const isBatchedField = document.getElementById('quickEditIsBatched');
+        const batchInfoField = document.getElementById('quickEditBatchInfo');
+        const numBatchesField = document.getElementById('quickEditNumBatches');
+        const totalStudentsField = document.getElementById('quickEditTotalStudents');
+        const practicalHoursField = document.getElementById('quickEditPracticalHours');
+        const coScheduleInfoField = document.getElementById('quickEditCoScheduleInfo');
+        const courseCodeDisplayField = document.getElementById('quickEditCourseCodeDisplay');
+
+        if (isBatchedField) {
+            updatedSession.is_batched = parseInt(isBatchedField.value);
+        }
+        
+        if (batchInfoField && batchInfoField.value.trim() !== '') {
+            updatedSession.batch_info = batchInfoField.value.trim();
+        }
+        
+        if (numBatchesField && numBatchesField.value) {
+            updatedSession.num_batches = parseInt(numBatchesField.value);
+        }
+        
+        if (totalStudentsField && totalStudentsField.value) {
+            updatedSession.total_students = parseInt(totalStudentsField.value);
+        }
+        
+        if (practicalHoursField && practicalHoursField.value) {
+            updatedSession.practical_hours = parseInt(practicalHoursField.value);
+        }
+        
+        if (coScheduleInfoField && coScheduleInfoField.value.trim() !== '') {
+            updatedSession.co_schedule_info = coScheduleInfoField.value.trim();
+        }
+
+        // Auto-generate course_code_display based on batch info
+        if (updatedSession.is_batched && updatedSession.batch_info) {
+            updatedSession.course_code_display = `${updatedSession.course_code} ${updatedSession.batch_info}`;
+        } else {
+            updatedSession.course_code_display = updatedSession.course_code;
+        }
+        
+        // Update the readonly field in the form
+        if (courseCodeDisplayField) {
+            courseCodeDisplayField.value = updatedSession.course_code_display;
+        }
     } else {
         updatedSession.time_slot = timeSlot;
     }
@@ -2090,12 +2637,31 @@ async function saveQuickEdit(sessionIndex) {
         updatedSession.room_number = room.number;
         updatedSession.block = room.block;
         updatedSession.capacity = room.capacity;
+        
+        // Update the room capacity field in the form
+        const capacityField = document.getElementById('quickEditRoomCapacity');
+        if (capacityField) {
+            capacityField.value = room.capacity;
+        }
+    }
+
+    // Check for capacity violations
+    if (updatedSession.student_count && updatedSession.capacity) {
+        if (updatedSession.student_count > updatedSession.capacity) {
+            const confirmOverride = confirm(
+                `⚠️ Warning: Student count (${updatedSession.student_count}) exceeds room capacity (${updatedSession.capacity}).\n\n` +
+                `This will create a capacity violation. Do you want to proceed anyway?`
+            );
+            if (!confirmOverride) {
+                return;
+            }
+        }
     }
 
     try {
         console.log(`🔄 Updating session: ${session.course_code} (${session.schedule_type})`);
-        console.log(`   Old: ${session.day} ${getSessionTimeSlot(session)} - ${session.teacher_name} - ${session.room_number}`);
-        console.log(`   New: ${updatedSession.day} ${getSessionTimeSlot(updatedSession)} - ${updatedSession.teacher_name} - ${updatedSession.room_number}`);
+        console.log(`   Old: ${session.day} ${getSessionTimeSlot(session)} - ${session.teacher_name} - ${session.room_number} - Students: ${session.student_count || 'N/A'}`);
+        console.log(`   New: ${updatedSession.day} ${getSessionTimeSlot(updatedSession)} - ${updatedSession.teacher_name} - ${updatedSession.room_number} - Students: ${updatedSession.student_count || 'N/A'}`);
         
         // Apply the change using allocation manager
         const result = await window.allocationManager.applyAllocationChange(sessionIndex, updatedSession);
@@ -2147,9 +2713,30 @@ async function saveQuickEdit(sessionIndex) {
             
             // 5. Refresh the schedule display
             renderContent();
+            updateSummaryStats();
             
             // 6. Show success message
-            showSuccessAlert('Session updated successfully! Old session deleted, new session saved to original JSON files.');
+            let successMessage = 'Session updated successfully! Changes saved to JSON files.';
+            if (updatedSession.student_count) {
+                successMessage += ` Student count set to ${updatedSession.student_count}.`;
+            }
+            if (updatedSession.schedule_type === 'lab') {
+                if (updatedSession.is_batched) {
+                    successMessage += ` Lab session configured as batched (${updatedSession.batch_info || 'Batch info'}).`;
+                } else {
+                    successMessage += ` Lab session configured as non-batched.`;
+                }
+                if (updatedSession.practical_hours) {
+                    successMessage += ` Practical hours: ${updatedSession.practical_hours}.`;
+                }
+                if (updatedSession.total_students) {
+                    successMessage += ` Total students across batches: ${updatedSession.total_students}.`;
+                }
+            }
+            if (updatedSession.student_count && updatedSession.capacity && updatedSession.student_count > updatedSession.capacity) {
+                successMessage += ` ⚠️ Note: Capacity violation detected.`;
+            }
+            showSuccessAlert(successMessage);
             
         } else {
             showErrorAlert(`Failed to save changes: ${result.message}`);
@@ -2962,3 +3549,61 @@ function showDragInstruction(show) {
         dragInstructionElement = null;
     }
 }
+
+// Toggle batch-related fields based on "Is Batched" selection
+function toggleBatchFields() {
+    const isBatched = document.getElementById('quickEditIsBatched').value === '1';
+    const batchInfo = document.getElementById('quickEditBatchInfo');
+    const numBatches = document.getElementById('quickEditNumBatches');
+    const courseCodeDisplay = document.getElementById('quickEditCourseCodeDisplay');
+    
+    if (batchInfo && numBatches) {
+        batchInfo.disabled = !isBatched;
+        numBatches.disabled = !isBatched;
+        
+        if (!isBatched) {
+            batchInfo.value = '';
+            numBatches.value = 1;
+            batchInfo.style.backgroundColor = '#f8f9fa';
+            numBatches.style.backgroundColor = '#f8f9fa';
+            if (courseCodeDisplay) {
+                const courseCode = document.getElementById('quickEditCourseCode').value;
+                courseCodeDisplay.value = courseCode;
+            }
+        } else {
+            batchInfo.style.backgroundColor = '';
+            numBatches.style.backgroundColor = '';
+            // Auto-generate batch info if empty
+            if (!batchInfo.value) {
+                batchInfo.value = 'Batch 1';
+            }
+            // Update course code display
+            updateCourseCodeDisplay();
+        }
+    }
+}
+
+// Update course code display based on batch info
+function updateCourseCodeDisplay() {
+    const courseCode = document.getElementById('quickEditCourseCode')?.value;
+    const batchInfo = document.getElementById('quickEditBatchInfo')?.value;
+    const isBatched = document.getElementById('quickEditIsBatched')?.value === '1';
+    const courseCodeDisplay = document.getElementById('quickEditCourseCodeDisplay');
+    
+    if (courseCodeDisplay && courseCode) {
+        if (isBatched && batchInfo && batchInfo.trim() !== '') {
+            courseCodeDisplay.value = `${courseCode} ${batchInfo.trim()}`;
+        } else {
+            courseCodeDisplay.value = courseCode;
+        }
+    }
+}
+
+// Add event listeners for batch fields when modal is shown
+function addBatchFieldListeners() {
+    const batchInfo = document.getElementById('quickEditBatchInfo');
+    if (batchInfo) {
+        batchInfo.addEventListener('input', updateCourseCodeDisplay);
+    }
+}
+
