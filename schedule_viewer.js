@@ -191,20 +191,25 @@ function getRoomType(roomNumber) {
 
 // ==== JSON FILE PERSISTENCE FUNCTIONS ====
 
-// Save changes directly to the original JSON files
+// Save changes directly to the original JSON and CSV files
 async function saveChangesToJsonFiles() {
     try {
-        console.log('💾 Saving changes to original JSON files...');
+        console.log('💾 Saving changes to original JSON and CSV files...');
         
-        // Save updated data directly to original files (server creates backups automatically)
-        await saveUpdatedJsonFiles();
+        // Use the global save function which handles both JSON and CSV
+        if (typeof saveUpdatedJsonAndCsvFiles === 'function') {
+            await saveUpdatedJsonAndCsvFiles();
+        } else {
+            // Fallback to JSON-only save if CSV function not available
+            await saveUpdatedJsonFiles();
+        }
         
-        console.log('✅ Changes saved to original JSON files successfully');
-        showSuccessAlert('Changes saved to original JSON files successfully!');
+        console.log('✅ Changes saved to original JSON and CSV files successfully');
+        showSuccessAlert('Changes saved to original JSON and CSV files successfully!');
         
     } catch (error) {
-        console.error('❌ Error saving changes to JSON files:', error);
-        showErrorAlert('Failed to save changes to JSON files: ' + error.message);
+        console.error('❌ Error saving changes to JSON and CSV files:', error);
+        showErrorAlert('Failed to save changes to JSON and CSV files: ' + error.message);
     }
 }
 
@@ -257,7 +262,7 @@ function downloadBackupFiles(backupData) {
     }
 }
 
-// Save updated JSON files directly to the original files
+// Save updated JSON files directly to the original files (fallback for JSON-only)
 async function saveUpdatedJsonFiles() {
     try {
         console.log('📤 Saving lab and theory schedules to original files...');
@@ -2704,7 +2709,7 @@ async function saveQuickEdit(sessionIndex) {
             console.log(`✅ Session replacement completed`);
             console.log(`   Total sessions: ${allData.length} (Lab: ${labData.length}, Theory: ${theoryData.length})`);
             
-            // 3. Persist changes to original JSON files
+            // 3. Persist changes to original JSON and CSV files
             await saveChangesToJsonFiles();
             
             // 4. Close modal
@@ -2716,7 +2721,7 @@ async function saveQuickEdit(sessionIndex) {
             updateSummaryStats();
             
             // 6. Show success message
-            let successMessage = 'Session updated successfully! Changes saved to JSON files.';
+            let successMessage = 'Session updated successfully! Changes saved to JSON and CSV files.';
             if (updatedSession.student_count) {
                 successMessage += ` Student count set to ${updatedSession.student_count}.`;
             }
@@ -3606,4 +3611,195 @@ function addBatchFieldListeners() {
         batchInfo.addEventListener('input', updateCourseCodeDisplay);
     }
 }
+
+// Convert JSON data to CSV format for lab sessions
+function convertLabDataToCSV(labData) {
+    const headers = [
+        'day', 'session_name', 'time_range', 'course_instance_id', 'course_code', 
+        'course_code_display', 'course_name', 'practical_hours', 'teacher_id', 
+        'teacher_name', 'staff_code', 'room_id', 'room_number', 'block', 'capacity',
+        'student_count', 'total_students', 'is_batched', 'batch_info', 'num_batches',
+        'schedule_type', 'group_name', 'group_index', 'department', 'semester',
+        'day_pattern', 'is_co_scheduled', 'co_schedule_id', 'co_schedule_group_size',
+        'co_schedule_partner_teachers', 'co_schedule_info'
+    ];
+    
+    const csvRows = [headers.join(',')];
+    
+    labData.forEach(session => {
+        const row = [
+            session.day || '',
+            session.session_name || '',
+            session.time_range || '',
+            session.course_instance_id || '',
+            session.course_code || '',
+            session.course_code_display || session.course_code || '',
+            session.course_name || '',
+            session.practical_hours || '2',
+            session.teacher_id || '',
+            session.teacher_name || '',
+            session.staff_code || '',
+            session.room_id || '',
+            session.room_number || '',
+            session.block || '',
+            session.capacity || '',
+            session.student_count || '',
+            session.total_students || session.student_count || '',
+            session.is_batched ? 'TRUE' : 'FALSE',
+            session.batch_info || '',
+            session.num_batches || '1',
+            'lab',
+            session.group_name || '',
+            session.group_index || '',
+            session.department || '',
+            session.semester || '',
+            session.day_pattern || '',
+            session.is_co_scheduled ? 'TRUE' : 'FALSE',
+            session.co_schedule_id || '',
+            session.co_schedule_group_size || '1',
+            session.co_schedule_partner_teachers || '',
+            session.co_schedule_info || 'Single session'
+        ];
+        
+        // Escape commas and quotes in CSV fields
+        const escapedRow = row.map(field => {
+            const fieldStr = String(field);
+            if (fieldStr.includes(',') || fieldStr.includes('"') || fieldStr.includes('\n')) {
+                return `"${fieldStr.replace(/"/g, '""')}"`;
+            }
+            return fieldStr;
+        });
+        
+        csvRows.push(escapedRow.join(','));
+    });
+    
+    return csvRows.join('\n');
+}
+
+// Convert JSON data to CSV format for theory sessions
+function convertTheoryDataToCSV(theoryData) {
+    const headers = [
+        'day', 'time_slot', 'slot_index', 'course_instance_id', 'course_code',
+        'course_name', 'session_type', 'session_number', 'teacher_id', 'teacher_name',
+        'staff_code', 'room_id', 'room_number', 'block', 'student_count',
+        'lecture_hours', 'tutorial_hours', 'schedule_type', 'is_co_scheduled',
+        'capacity_info', 'partner_instance_id', 'group_name', 'group_index',
+        'department', 'semester', 'day_pattern'
+    ];
+    
+    const csvRows = [headers.join(',')];
+    
+    theoryData.forEach(session => {
+        // Calculate slot_index from time_slot
+        const timeSlotToIndex = {
+            '8:00 - 8:50': 0, '9:00 - 9:50': 1, '10:00 - 10:50': 2,
+            '11:00 - 11:50': 3, '12:00 - 12:50': 4, '1:00 - 1:50': 5,
+            '2:00 - 2:50': 6, '3:00 - 3:50': 7, '4:00 - 4:50': 8,
+            '5:00 - 5:50': 9, '6:00 - 6:50': 10
+        };
+        
+        const row = [
+            session.day || '',
+            session.time_slot || '',
+            timeSlotToIndex[session.time_slot] !== undefined ? timeSlotToIndex[session.time_slot] : '',
+            session.course_instance_id || '',
+            session.course_code || '',
+            session.course_name || '',
+            session.session_type || 'Lecture',
+            session.session_number || '1',
+            session.teacher_id || '',
+            session.teacher_name || '',
+            session.staff_code || '',
+            session.room_id || '',
+            session.room_number || '',
+            session.block || '',
+            session.student_count || '70',
+            session.lecture_hours || '3',
+            session.tutorial_hours || '0',
+            'theory',
+            session.is_co_scheduled ? 'TRUE' : 'FALSE',
+            session.capacity_info || `Regular: ${session.student_count || '70'} students`,
+            session.partner_instance_id || '',
+            session.group_name || '',
+            session.group_index || '',
+            session.department || '',
+            session.semester || '',
+            session.day_pattern || ''
+        ];
+        
+        // Escape commas and quotes in CSV fields
+        const escapedRow = row.map(field => {
+            const fieldStr = String(field);
+            if (fieldStr.includes(',') || fieldStr.includes('"') || fieldStr.includes('\n')) {
+                return `"${fieldStr.replace(/"/g, '""')}"`;
+            }
+            return fieldStr;
+        });
+        
+        csvRows.push(escapedRow.join(','));
+    });
+    
+    return csvRows.join('\n');
+}
+
+// Save CSV data to server via API
+async function saveCsvToServer(csvData, filepath) {
+    console.log(`📡 Sending CSV data to ${filepath}...`);
+    
+    const response = await fetch('/api/save-csv', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            data: csvData,
+            filepath: filepath
+        })
+    });
+    
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Server error (${response.status}): ${errorText}`);
+    }
+    
+    const result = await response.json();
+    console.log(`✅ ${filepath}: ${result.message}`);
+    
+    return result;
+}
+
+// Save updated JSON and CSV files directly to the original files
+async function saveUpdatedJsonAndCsvFiles() {
+    try {
+        console.log('📤 Saving allocation data to original JSON and CSV files...');
+        
+        // Convert data to CSV format
+        const labCsvData = convertLabDataToCSV(labData);
+        const theoryCsvData = convertTheoryDataToCSV(theoryData);
+        
+        // Save both JSON and CSV files simultaneously
+        const savePromises = [
+            // JSON files
+            saveJsonToServer(labData, './output/combined_lab_schedule.json'),
+            saveJsonToServer(theoryData, './output/combined_theory_schedule.json'),
+            // CSV files
+            saveCsvToServer(labCsvData, './output/combined_schedule_lab.csv'),
+            saveCsvToServer(theoryCsvData, './output/combined_schedule_theory.csv')
+        ];
+        
+        const results = await Promise.all(savePromises);
+        
+        console.log('✅ All allocation files saved to original location successfully (JSON + CSV)');
+        console.log(`   - Lab sessions: ${labData.length} saved (JSON + CSV)`);
+        console.log(`   - Theory sessions: ${theoryData.length} saved (JSON + CSV)`);
+        
+        return results;
+        
+    } catch (error) {
+        console.error('❌ Error saving updated JSON and CSV files:', error);
+        throw new Error(`Failed to save allocation files to original location: ${error.message}`);
+    }
+}
+
+// ==== BACKUP MANAGEMENT FUNCTIONS ====
 
