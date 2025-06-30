@@ -503,16 +503,8 @@ class AllocationManager {
                     });
                 }
                 
-                // Group conflict (only if different courses)
-                if (session.group_name === otherSession.group_name && 
-                    session.course_instance_id !== otherSession.course_instance_id) {
-                    conflicts.push({
-                        type: 'group_conflict',
-                        message: `Group ${session.group_name} has another course`,
-                        conflictingSession: otherSession,
-                        conflictingIndex: index
-                    });
-                }
+                // ✅ Group conflicts removed: Different courses in same group are now allowed
+                // No longer reporting group conflicts for different courses in same group
             }
         });
         
@@ -1381,16 +1373,8 @@ class AllocationManager {
                     });
                 }
                 
-                // Group conflict (only if different courses)
-                if (session.group_name === otherSession.group_name && 
-                    session.course_instance_id !== otherSession.course_instance_id) {
-                    conflicts.push({
-                        type: 'group_conflict',
-                        message: `Group ${session.group_name} has another course`,
-                        conflictingSession: otherSession,
-                        conflictingIndex: index
-                    });
-                }
+                // ✅ Group conflicts removed: Different courses in same group are now allowed
+                // No longer reporting group conflicts for different courses in same group
             }
         });
         

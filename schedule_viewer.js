@@ -729,21 +729,12 @@ function detectGroupConflicts() {
                 const allLabSessions = sessions.every(s => s.schedule_type === 'lab');
                 
                 if (isLargeLab && allLabSessions) {
-                    // Large lab capacity - may be intentional co-scheduling, mark as warning
-                    detectedConflicts.push({
-                        type: 'group_conflict',
-                        severity: 'warning',
-                        message: `Group ${sessions[0].group_name} has ${sessions.length} different courses at the same time (Large Lab - May be intentional co-scheduling)`,
-                        sessions: sessions,
-                        details: {
-                            group: sessions[0].group_name,
-                            day: sessions[0].day,
-                            time: sessions[0].schedule_type === 'lab' ? sessions[0].time_range : sessions[0].time_slot,
-                            courses: Array.from(uniqueCourses),
-                            note: 'Large capacity lab may support co-scheduling per scheduler rules',
-                            maxCapacity: maxCapacity
-                        }
+                    // Large lab capacity - mark as allowed co-scheduling
+                    sessions.forEach(session => {
+                        session.is_large_lab_co_scheduled = true;
+                        session.co_schedule_info = `Large lab co-scheduling (${maxCapacity}+ capacity - ${sessions.length} courses)`;
                     });
+                    console.log(`✅ Large lab co-scheduling allowed: Group ${sessions[0].group_name} - ${Array.from(uniqueCourseCodes).join(', ')} in ${maxCapacity} capacity lab`);
                 } else {
                     // 4. Check for closely related course codes (e.g., CS23331 vs CS23333)
                     const coursePattern = /^([A-Z]+)(\d{3})(\d{2})$/;
@@ -796,19 +787,12 @@ function detectGroupConflicts() {
                         }
                     }
                     
-                    // Different courses, not co-schedulable - definite conflict
-                    detectedConflicts.push({
-                        type: 'group_conflict',
-                        severity: 'high',
-                        message: `Group ${sessions[0].group_name} has multiple different courses at the same time`,
-                        sessions: sessions,
-                        details: {
-                            group: sessions[0].group_name,
-                            day: sessions[0].day,
-                            time: sessions[0].schedule_type === 'lab' ? sessions[0].time_range : sessions[0].time_slot,
-                            courses: Array.from(uniqueCourses)
-                        }
+                    // ✅ ALLOW: Different courses in same group are now allowed
+                    sessions.forEach(session => {
+                        session.is_different_course_allowed = true;
+                        session.co_schedule_info = `Different courses allowed in same group (constraint removed per user request)`;
                     });
+                    console.log(`✅ Different courses allowed: Group ${sessions[0].group_name} - ${Array.from(uniqueCourseCodes).join(', ')} at ${sessions[0].day} ${sessions[0].schedule_type === 'lab' ? sessions[0].time_range : sessions[0].time_slot}`);
                 }
             }
         }
@@ -856,8 +840,7 @@ function highlightConflicts() {
                     const indicator = document.createElement('div');
                     indicator.className = 'conflict-indicator';
                     indicator.textContent = conflict.type === 'teacher_conflict' ? 'T' :
-                                         conflict.type === 'room_conflict' ? 'R' :
-                                         conflict.type === 'group_conflict' ? 'G' : 'C';
+                                         conflict.type === 'room_conflict' ? 'R' : 'C';
                     indicator.title = conflict.message;
                     element.style.position = 'relative';
                     element.appendChild(indicator);
@@ -1049,18 +1032,8 @@ function showQuickEditModal(sessionIndex) {
                         </div>
                     </div>
 
-                    <!-- Availability Information -->
-                    <div class="row mt-3">
-                        <div class="col-12">
-                            <div id="availabilityInfo" class="alert alert-info">
-                                <i class="fas fa-info-circle me-2"></i>
-                                Select a day and time slot to see availability information
-                            </div>
-                        </div>
-                    </div>
-
                     <!-- Validation Results -->
-                    <div id="quickValidationResults"></div>
+                    <div id="quickValidationResults" class="mt-3"></div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -1136,137 +1109,99 @@ function populateQuickTimeSlots(sessionType, currentTimeSlot) {
     }
 }
 
-// Populate teachers for quick edit
+// Populate teachers for quick edit (initial setup - will be filtered by updateAvailability)
 function populateQuickTeachers(currentTeacherId) {
     const teacherSelect = document.getElementById('quickEditTeacher');
     teacherSelect.innerHTML = '<option value="">Select Teacher</option>';
-
-    if (window.allocationManager && window.allocationManager.teachers) {
-        Array.from(window.allocationManager.teachers).forEach(teacherStr => {
-            const teacher = JSON.parse(teacherStr);
+    
+    // Add current teacher if available (will be updated by updateAvailability)
+    if (currentTeacherId && window.allocationManager && window.allocationManager.teachers) {
+        const currentTeacher = Array.from(window.allocationManager.teachers)
+            .map(teacherStr => JSON.parse(teacherStr))
+            .find(teacher => teacher.id == currentTeacherId);
+        
+        if (currentTeacher) {
             const option = document.createElement('option');
-            option.value = teacher.id;
-            option.textContent = `${teacher.name} (${teacher.staff_code})`;
-            option.selected = (teacher.id == currentTeacherId);
+            option.value = currentTeacher.id;
+            option.textContent = `${currentTeacher.name} (${currentTeacher.staff_code})`;
+            option.selected = true;
             teacherSelect.appendChild(option);
-        });
+        }
     }
 }
 
-// Populate rooms for quick edit
+// Populate rooms for quick edit (initial setup - will be filtered by updateAvailability)
 function populateQuickRooms(currentRoomId, sessionType) {
     const roomSelect = document.getElementById('quickEditRoom');
     roomSelect.innerHTML = '<option value="">Select Room</option>';
 
-    if (window.allocationManager && window.allocationManager.rooms) {
-        Array.from(window.allocationManager.rooms).forEach(roomStr => {
-            const room = JSON.parse(roomStr);
-            
-            // Filter rooms by type if needed
-            const roomType = window.allocationManager.getRoomType(room.number);
-            if (sessionType === 'lab' && roomType !== 'lab') return;
-            
+    // Add current room if available (will be updated by updateAvailability)
+    if (currentRoomId && window.allocationManager && window.allocationManager.rooms) {
+        const currentRoom = Array.from(window.allocationManager.rooms)
+            .map(roomStr => JSON.parse(roomStr))
+            .find(room => room.id == currentRoomId);
+        
+        if (currentRoom) {
             const option = document.createElement('option');
-            option.value = room.id;
-            option.textContent = `${room.number} (${room.block}) - Cap: ${room.capacity}`;
-            option.selected = (room.id == currentRoomId);
+            option.value = currentRoom.id;
+            option.textContent = `${currentRoom.number} (${currentRoom.block}) - Cap: ${currentRoom.capacity}`;
+            option.selected = true;
             roomSelect.appendChild(option);
-        });
+        }
     }
 }
 
-// Update availability information
+// Update availability and filter dropdowns
 function updateAvailability() {
     const day = document.getElementById('quickEditDay').value;
     const timeSlot = document.getElementById('quickEditTimeSlot').value;
-    const availabilityInfo = document.getElementById('availabilityInfo');
 
     if (!day || !timeSlot || !window.allocationManager) {
-        availabilityInfo.innerHTML = '<i class="fas fa-info-circle me-2"></i>Select a day and time slot to see availability';
         return;
     }
 
-    // Get available rooms and teachers
-    const sessionType = document.querySelector('[data-session-index]').getAttribute('data-session-type');
-    const availableRooms = window.allocationManager.getAvailableRooms(day, timeSlot, sessionType);
-    const availableTeachers = window.allocationManager.getAvailableTeachers(day, timeSlot);
-
-    let html = `
-        <div class="row">
-            <div class="col-md-6">
-                <h6 class="text-success"><i class="fas fa-door-open me-1"></i>Available Rooms (${availableRooms.length})</h6>
-                <div class="available-items">
-    `;
-
-    if (availableRooms.length > 0) {
-        availableRooms.slice(0, 10).forEach(room => {
-            html += `<span class="badge bg-success me-1 mb-1">${room.number} (${room.capacity})</span>`;
-        });
-        if (availableRooms.length > 10) {
-            html += `<span class="text-muted">... and ${availableRooms.length - 10} more</span>`;
-        }
-    } else {
-        html += '<span class="text-muted">No rooms available</span>';
-    }
-
-    html += `
-                </div>
-            </div>
-            <div class="col-md-6">
-                <h6 class="text-primary"><i class="fas fa-user-tie me-1"></i>Available Teachers (${availableTeachers.length})</h6>
-                <div class="available-items">
-    `;
-
-    if (availableTeachers.length > 0) {
-        availableTeachers.slice(0, 8).forEach(teacher => {
-            html += `<span class="badge bg-primary me-1 mb-1">${teacher.name}</span>`;
-        });
-        if (availableTeachers.length > 8) {
-            html += `<span class="text-muted">... and ${availableTeachers.length - 8} more</span>`;
-        }
-    } else {
-        html += '<span class="text-muted">No teachers available</span>';
-    }
-
-    html += `
-                </div>
-            </div>
-        </div>
-    `;
-
-    availabilityInfo.innerHTML = html;
-    availabilityInfo.className = 'alert alert-success';
+    // Get session type from the save button onclick to extract session index
+    const saveBtn = document.getElementById('quickSaveBtn');
+    const sessionIndex = parseInt(saveBtn.getAttribute('onclick').match(/\d+/)[0]);
+    const session = allData[sessionIndex];
+    const sessionType = session ? session.schedule_type : 'theory';
 
     // Update dropdowns to show only available options
     updateQuickDropdowns(day, timeSlot, sessionType);
     checkValidation();
 }
 
-// Update dropdowns to highlight available options
+// Update dropdowns to show only available options
 function updateQuickDropdowns(day, timeSlot, sessionType) {
     if (!window.allocationManager) return;
 
     const availableRooms = window.allocationManager.getAvailableRooms(day, timeSlot, sessionType);
     const availableTeachers = window.allocationManager.getAvailableTeachers(day, timeSlot);
 
-    // Update room dropdown
+    // Get current selections
     const roomSelect = document.getElementById('quickEditRoom');
-    Array.from(roomSelect.options).forEach(option => {
-        if (option.value) {
-            const isAvailable = availableRooms.some(room => room.id == option.value);
-            option.style.color = isAvailable ? 'green' : 'red';
-            option.title = isAvailable ? 'Available' : 'Not available';
-        }
+    const teacherSelect = document.getElementById('quickEditTeacher');
+    const currentRoomId = roomSelect.value;
+    const currentTeacherId = teacherSelect.value;
+
+    // Update room dropdown with only available rooms
+    roomSelect.innerHTML = '<option value="">Select Room</option>';
+    availableRooms.forEach(room => {
+        const option = document.createElement('option');
+        option.value = room.id;
+        option.textContent = `${room.number} (${room.block}) - Cap: ${room.capacity}`;
+        option.selected = (room.id == currentRoomId);
+        roomSelect.appendChild(option);
     });
 
-    // Update teacher dropdown
-    const teacherSelect = document.getElementById('quickEditTeacher');
-    Array.from(teacherSelect.options).forEach(option => {
-        if (option.value) {
-            const isAvailable = availableTeachers.some(teacher => teacher.id == option.value);
-            option.style.color = isAvailable ? 'green' : 'red';
-            option.title = isAvailable ? 'Available' : 'Not available';
-        }
+    // Update teacher dropdown with only available teachers
+    teacherSelect.innerHTML = '<option value="">Select Teacher</option>';
+    availableTeachers.forEach(teacher => {
+        const option = document.createElement('option');
+        option.value = teacher.id;
+        option.textContent = `${teacher.name} (${teacher.staff_code})`;
+        option.selected = (teacher.id == currentTeacherId);
+        teacherSelect.appendChild(option);
     });
 }
 
@@ -1421,8 +1356,8 @@ function showSessionTooltip(event, sessionIndex) {
     // Remove existing tooltip
     hideSessionTooltip();
     
-    // Get conflicts for this session
-    const conflicts = window.allocationManager.getSessionConflicts(sessionIndex);
+    // Get conflicts for this session (excluding group conflicts since different courses in same group are now allowed)
+    const conflicts = window.allocationManager.getSessionConflicts(sessionIndex).filter(conflict => conflict.type !== 'group_conflict');
     
     // Create tooltip
     const tooltip = document.createElement('div');
@@ -1950,29 +1885,9 @@ async function validateDrop(sessionIndex, newDay, newTimeSlot) {
         
         const validationResult = validateCoScheduling();
         
-        if (!validationResult.allowed) {
-            // ❌ GROUP CONFLICT: Different courses not allowed
-            const conflictingCourses = groupConflicts.map(g => g.course_code);
-            conflicts.push({
-                type: 'group_conflict',
-                severity: 'high',
-                message: `❌ Group ${session.group_name}: ${conflictingCourses.join(', ')} vs ${session.course_code}`,
-                details: {
-                    group: session.group_name,
-                    currentCourse: session.course_code,
-                    conflictingCourses: conflictingCourses,
-                    timeSlot: newTimeSlot,
-                    day: newDay,
-                    reason: validationResult.reason,
-                    rule: validationResult.rule,
-                    explanation: "Different courses in same group at same time violates scheduling constraints"
-                }
-            });
-        } else {
-            // ✅ CO-SCHEDULING ALLOWED: Log successful validation
-            console.log(`✅ Co-scheduling allowed: ${session.group_name} - ${validationResult.reason} (${validationResult.rule})`);
-            console.log(`   Courses: ${uniqueCourseCodes.join(', ')} at ${newDay} ${newTimeSlot}`);
-        }
+        // ✅ ALLOW: Different courses in same group are now allowed
+        console.log(`✅ Different courses allowed: ${session.group_name} - ${validationResult.reason} (${validationResult.rule})`);
+        console.log(`   Courses: ${uniqueCourseCodes.join(', ')} at ${newDay} ${newTimeSlot}`);
     }
     
     // 4. Department day pattern validation (matching Python scheduler)
