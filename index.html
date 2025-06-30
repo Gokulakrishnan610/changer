@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Timetable Visualizer</title>
+  <link href="https://fonts.googleapis.com/css2?family=Open+Sans&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      height: 100vh;
+      background-color: #fff;
+      margin: 0;
+    }
+
+    .header {
+      position: relative;
+      width: calc(100% - 3em);
+      text-align: center;
+      margin-top: 1em;
+      font-size: 16px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: #000;
+      border: 3px solid;
+      padding: 0.5em;
+      box-shadow: 1px 1px 0px 0px, 2px 2px 0px 0px, 3px 3px 0px 0px, 4px 4px 0px 0px, 5px 5px 0px 0px;
+      user-select: none;
+    }
+
+    .button-wrapper {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: 1em;
+      margin-top: 6em;
+    }
+
+    .regulations {
+        font-size: 16px;
+        margin-top: 5em;
+    }
+
+    .btn {
+      text-decoration: none;
+      font-family: "Open Sans", sans-serif;
+      font-size: 16px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: #000;
+      cursor: pointer;
+      border: 3px solid;
+      padding: 0.5em 1em;
+      box-shadow: 1px 1px 0px 0px, 2px 2px 0px 0px, 3px 3px 0px 0px, 4px 4px 0px 0px, 5px 5px 0px 0px;
+      position: relative;
+      user-select: none;
+    }
+
+    .btn:active {
+      box-shadow: none;
+      top: 5px;
+      left: 5px;
+    }
+
+    @media (min-width: 768px) {
+      .btn {
+        padding: 1.5em 2em;
+      }
+    }
+
+    .regulation_heading {
+        text-decoration: underline;
+        text-underline-offset: 4px;
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <h1>Timetable Visualizer</h1>
+  </header>
+  <div class="button-wrapper">
+    <a href="./room_timetable.html" class="btn">Room Allocations</a>
+    <a href="./allocation_manager.html" class="btn">Allocation Manager</a>
+    <!-- <a href="./shift_reports_viewer.html" class="btn">Shift Report</a> -->
+    <a href="./schedule_website.html" class="btn">Interactive Timetable</a>
+    <a href="./test_interactive_editing.html" class="btn" style="background-color: #28a745; color: white;">✨ New Features</a>
+     <!-- <p style="font-size: 16px;">Version 2.0 of the timetable will be released soon. Data preprocessing is currently underway, and we will update you shortly.</p> -->
+  </div>
+  <!-- <div class="regulations">
+    <span class="regulation_heading">Do's and Dont's</span>
+    <ul>
+        <li>If you add a assist teacher for the primary teacher</li>
+        <li></li>
+    </ul>
+  </div> -->
+</body>
+</html>

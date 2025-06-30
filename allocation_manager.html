@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Allocation Manager - University Timetable Scheduler</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --secondary-color: #3498db;
+            --success-color: #27ae60;
+            --warning-color: #f39c12;
+            --danger-color: #e74c3c;
+            --header-bg: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+        }
+
+        .navbar {
+            background: var(--header-bg) !important;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .navbar-brand {
+            font-weight: bold;
+            font-size: 1.3rem;
+        }
+
+        .card {
+            border: none;
+            border-radius: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+        }
+
+        .conflict-card {
+            border-left: 4px solid var(--danger-color);
+        }
+
+        .warning-card {
+            border-left: 4px solid var(--warning-color);
+        }
+
+        .success-card {
+            border-left: 4px solid var(--success-color);
+        }
+
+        .conflict-high {
+            background-color: #fdf2f2;
+            border-color: var(--danger-color);
+        }
+
+        .conflict-medium {
+            background-color: #fefcf3;
+            border-color: var(--warning-color);
+        }
+
+        .conflict-low {
+            background-color: #f0f9ff;
+            border-color: var(--secondary-color);
+        }
+
+        .session-card {
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .session-card:hover {
+            background-color: #f8f9fa;
+            border-color: var(--secondary-color);
+        }
+
+        .session-card.selected {
+            background-color: #e3f2fd;
+            border-color: var(--secondary-color);
+            border-width: 2px;
+        }
+
+        .edit-form {
+            background-color: #fff;
+            border-radius: 10px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stats-card {
+            text-align: center;
+            padding: 1.5rem;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .stats-number {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+
+        .conflicts-container {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .session-details {
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        .time-slot-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 0.5rem;
+            margin: 1rem 0;
+        }
+
+        .time-slot-btn {
+            padding: 0.5rem;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            background: white;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .time-slot-btn:hover {
+            background-color: #f8f9fa;
+            border-color: var(--secondary-color);
+        }
+
+        .time-slot-btn.occupied {
+            background-color: #fdf2f2;
+            border-color: var(--danger-color);
+            cursor: not-allowed;
+        }
+
+        .time-slot-btn.selected {
+            background-color: #e3f2fd;
+            border-color: var(--secondary-color);
+            border-width: 2px;
+        }
+
+        .validation-result {
+            margin-top: 1rem;
+            padding: 1rem;
+            border-radius: 8px;
+        }
+
+        .validation-success {
+            background-color: #d1f2eb;
+            border: 1px solid var(--success-color);
+            color: #0f5132;
+        }
+
+        .validation-error {
+            background-color: #fdf2f2;
+            border: 1px solid var(--danger-color);
+            color: #842029;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid">
+            <span class="navbar-brand">
+                <i class="fas fa-calendar-edit me-2"></i>
+                Allocation Manager
+            </span>
+            <div class="navbar-nav ms-auto">
+                <a href="index.html" class="nav-link">
+                    <i class="fas fa-home me-1"></i>
+                    Home
+                </a>
+                <a href="schedule_website.html" class="nav-link">
+                    <i class="fas fa-calendar me-1"></i>
+                    Interactive Schedule
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <!-- Loading State -->
+        <div id="loadingState" class="text-center py-5">
+            <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;"></div>
+            <div class="mt-3">Loading schedule data and detecting conflicts...</div>
+        </div>
+
+        <!-- Main Content -->
+        <div id="mainContent" class="d-none">
+            <!-- Statistics Dashboard -->
+            <div class="stats-grid" id="statsGrid">
+                <!-- Will be populated dynamically -->
+            </div>
+
+            <!-- Conflict Detection Results -->
+            <div class="row">
+                <div class="col-lg-6">
+                    <div class="card">
+                        <div class="card-header bg-danger text-white">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-exclamation-triangle me-2"></i>
+                                    Conflicts Detected
+                                    <span class="badge bg-light text-dark ms-2" id="conflictCount">0</span>
+                                </h5>
+                                <button class="btn btn-warning btn-sm" onclick="cleanDuplicates()" title="Remove duplicate sessions from dataset">
+                                    <i class="fas fa-broom me-1"></i>
+                                    Clean Duplicates
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="conflicts-container" id="conflictsContainer">
+                                <!-- Conflicts will be populated here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-lg-6">
+                    <div class="card">
+                        <div class="card-header bg-primary text-white">
+                            <h5 class="mb-0">
+                                <i class="fas fa-edit me-2"></i>
+                                Session Editor
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="sessionEditor">
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle me-2"></i>
+                                    Select a session from the conflicts list or search below to edit
+                                </div>
+                                
+                                <!-- Session Search -->
+                                <div class="mb-3">
+                                    <label class="form-label">Search Sessions</label>
+                                    <div class="input-group">
+                                        <input type="text" class="form-control" id="sessionSearch" 
+                                               placeholder="Search by course, teacher, room, or group...">
+                                        <button class="btn btn-outline-secondary" type="button" id="searchBtn">
+                                            <i class="fas fa-search"></i>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Search Results -->
+                                <div id="searchResults" class="mb-3" style="display: none;">
+                                    <!-- Search results will appear here -->
+                                </div>
+
+                                <!-- Edit Form -->
+                                <div id="editForm" style="display: none;">
+                                    <!-- Edit form will be populated here -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Available Time Slots -->
+            <div class="row mt-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0">
+                                <i class="fas fa-clock me-2"></i>
+                                Available Time Slots
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="timeSlotsContainer">
+                                <!-- Time slots will be populated here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Session Modal -->
+    <div class="modal fade" id="editSessionModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="fas fa-edit me-2"></i>
+                        Edit Session
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="sessionEditForm">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Course Code</label>
+                                    <input type="text" class="form-control" id="editCourseCode" readonly>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Course Name</label>
+                                    <input type="text" class="form-control" id="editCourseName" readonly>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Day *</label>
+                                    <select class="form-control" id="editDay" required>
+                                        <option value="">Select Day</option>
+                                        <option value="monday">Monday</option>
+                                        <option value="tuesday">Tuesday</option>
+                                        <option value="wed">Wednesday</option>
+                                        <option value="thur">Thursday</option>
+                                        <option value="fri">Friday</option>
+                                        <option value="saturday">Saturday</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Time Slot *</label>
+                                    <select class="form-control" id="editTimeSlot" required>
+                                        <option value="">Select Time Slot</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Session Type</label>
+                                    <select class="form-control" id="editSessionType" disabled>
+                                        <option value="theory">Theory</option>
+                                        <option value="lab">Lab</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Teacher *</label>
+                                    <select class="form-control" id="editTeacher" required>
+                                        <option value="">Select Teacher</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Room *</label>
+                                    <select class="form-control" id="editRoom" required>
+                                        <option value="">Select Room</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Group</label>
+                                    <input type="text" class="form-control" id="editGroup" readonly>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="mb-3">
+                                    <label class="form-label">Student Count</label>
+                                    <input type="number" class="form-control" id="editStudentCount">
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="mb-3">
+                                    <label class="form-label">Room Capacity</label>
+                                    <input type="number" class="form-control" id="editRoomCapacity" readonly>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Validation Results -->
+                        <div id="validationResults"></div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="validateBtn">
+                        <i class="fas fa-check-circle me-1"></i>
+                        Validate Changes
+                    </button>
+                    <button type="button" class="btn btn-success" id="saveBtn" disabled>
+                        <i class="fas fa-save me-1"></i>
+                        Save Changes
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="allocation_manager.js"></script>
+    <script>
+        // Application initialization and UI management
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeAllocationManager();
+        });
+    </script>
+</body>
+</html> 
