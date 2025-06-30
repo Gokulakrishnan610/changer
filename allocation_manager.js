@@ -135,16 +135,21 @@ class AllocationManager {
                 }));
             }
             if (session.room_number && session.room_id) {
+                // Determine room type and set appropriate default capacity
+                const roomType = this.getRoomType(session.room_number);
+                const defaultCapacity = roomType === 'theory' ? 70 : 35;
+                const actualCapacity = session.capacity || defaultCapacity;
+                
                 this.rooms.add(JSON.stringify({
                     id: session.room_id,
                     number: session.room_number,
                     block: session.block,
-                    capacity: session.capacity || 35
+                    capacity: actualCapacity
                 }));
                 
                 // Track room types and capacities
-                this.roomTypes.set(session.room_id, this.getRoomType(session.room_number));
-                this.roomCapacities.set(session.room_id, session.capacity || 35);
+                this.roomTypes.set(session.room_id, roomType);
+                this.roomCapacities.set(session.room_id, actualCapacity);
             }
             if (session.group_name) {
                 this.groups.add(session.group_name);

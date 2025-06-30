@@ -39,6 +39,27 @@ async function loadData() {
             theoryData = await theoryRes.json();
             allData = [...labData, ...theoryData];
             
+            // Fix room capacities: Set default capacity of 70 for theory rooms, 35 for lab rooms
+            allData.forEach(session => {
+                if (session.room_number && (!session.capacity || session.capacity === null)) {
+                    const roomType = getRoomType(session.room_number);
+                    session.capacity = roomType === 'theory' ? 70 : 35;
+                }
+            });
+            
+            // Update the original arrays as well
+            labData.forEach(session => {
+                if (session.room_number && (!session.capacity || session.capacity === null)) {
+                    session.capacity = 35; // Lab rooms default to 35
+                }
+            });
+            
+            theoryData.forEach(session => {
+                if (session.room_number && (!session.capacity || session.capacity === null)) {
+                    session.capacity = 70; // Theory rooms default to 70
+                }
+            });
+            
             if (shiftRes && shiftRes.ok) {
                 teacherShiftData = await shiftRes.json();
         }
@@ -53,6 +74,16 @@ async function loadData() {
     } catch (error) {
         document.getElementById('mainContent').innerHTML = `<div class="alert alert-danger text-center">Error loading data: ${error.message}</div>`;
     }
+}
+
+// Determine room type based on room number (same logic as allocation manager)
+function getRoomType(roomNumber) {
+    if (!roomNumber) return 'unknown';
+    const room = roomNumber.toString().toLowerCase();
+    if (room.includes('lab') || room.includes('comp') || room.includes('cse') || room.includes('it')) {
+        return 'lab';
+    }
+    return 'theory';
 }
 
 function initializeUI() {
@@ -1066,7 +1097,7 @@ function showQuickEditModal(sessionIndex) {
                                     <div class="flex-grow-1">
                                         <small class="text-muted">To:</small>
                                         <select class="form-control form-control-sm" id="quickEditRoom" onchange="checkValidation()" onfocus="populateAvailableRooms()">
-                                            <option value="${session.room_id}">${session.room_number} (${session.block}) - Cap: ${session.capacity}</option>
+                                            <option value="${session.room_id}">${session.room_number} (${session.block}) - Capacity: ${session.capacity}</option>
                                         </select>
                                     </div>
                                 </div>
@@ -1262,7 +1293,7 @@ function populateAvailableRooms() {
         if (currentRoom) {
             const option = document.createElement('option');
             option.value = currentRoom.id;
-            option.textContent = `${currentRoom.number} (${currentRoom.block}) - Cap: ${currentRoom.capacity} ${availableRooms.some(r => r.id == currentRoomId) ? '✓' : '⚠️ (Busy)'}`;
+            option.textContent = `${currentRoom.number} (${currentRoom.block}) - Capacity: ${currentRoom.capacity} ${availableRooms.some(r => r.id == currentRoomId) ? '✓' : '⚠️ (Busy)'}`;
             option.selected = true;
             option.style.fontWeight = 'bold';
             roomSelect.appendChild(option);
@@ -1274,7 +1305,7 @@ function populateAvailableRooms() {
         if (room.id != currentRoomId) { // Don't duplicate current room
             const option = document.createElement('option');
             option.value = room.id;
-            option.textContent = `${room.number} (${room.block}) - Cap: ${room.capacity}`;
+            option.textContent = `${room.number} (${room.block}) - Capacity: ${room.capacity}`;
             roomSelect.appendChild(option);
         }
     });
@@ -1304,7 +1335,7 @@ function populateAvailableRooms() {
         unavailableRooms.forEach(room => {
             const option = document.createElement('option');
             option.value = room.id;
-            option.textContent = `${room.number} (${room.block}) - Cap: ${room.capacity} - Busy`;
+            option.textContent = `${room.number} (${room.block}) - Capacity: ${room.capacity} - Busy`;
             option.style.color = '#999';
             roomSelect.appendChild(option);
         });
@@ -1336,7 +1367,7 @@ function updateAvailability() {
     }
     
     if (!roomSelect.value && session) {
-        roomSelect.innerHTML = `<option value="${session.room_id}" selected>${session.room_number} (${session.block}) - Cap: ${session.capacity}</option>`;
+        roomSelect.innerHTML = `<option value="${session.room_id}" selected>${session.room_number} (${session.block}) - Capacity: ${session.capacity}</option>`;
     }
 
     checkValidation();
