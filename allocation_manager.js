@@ -1362,15 +1362,16 @@ class AllocationManager {
         };
     }
 
-    // ✅ UPDATED: Check time slot exclusivity rules (Fixed to avoid false positives)
+    // ✅ UPDATED: Check time slot exclusivity rules (Fixed to allow different courses in same group)
     checkTimeSlotExclusivity(newSession, tempData) {
         const conflicts = [];
         
         // Get time key for the new session
         const newTimeKey = this.getTimeKey(newSession);
         
-        // REMOVED: Theory-Lab Global Exclusivity rule - was causing false positives
-        // Different departments/semesters can have lab and theory sessions simultaneously
+        // ✅ UPDATED LOGIC: Allow different courses in same group at same time
+        // Only prevent duplicate courses, not different courses
+        // This supports split groups, electives, and specialized tracks
         
         // Rule 1: Theory sessions within same group/department
         // Check if the same group already has a theory session at this time
@@ -1383,20 +1384,47 @@ class AllocationManager {
                 s.schedule_type === 'theory' &&
                 s.day === newSession.day &&
                 s.time_slot === newSession.time_slot &&
-                s.group_name === newSession.group_name  // Same group only
+                s.group_name === newSession.group_name &&  // Same group only
+                // ✅ MODIFIED: Only flag if it's the exact same course (not different courses)
+                s.course_code === newSession.course_code
             );
+            
+            // ✅ ADDED: Debug logging for time slot exclusivity
+            if (sameGroupTheoryConflicts.length > 0) {
+                console.log(`🔍 Time slot exclusivity check for ${newSession.group_name} on ${newSession.day} at ${newSession.time_slot}:`);
+                console.log(`   New session: ${newSession.course_code} (index: ${newSession.sessionIndex})`);
+                sameGroupTheoryConflicts.forEach(s => {
+                    console.log(`   Found conflicting theory session: ${s.course_code} (index: ${s.sessionIndex})`);
+                });
+            }
+            
+            // ✅ ADDED: Debug logging for excluded sessions in time slot exclusivity
+            const excludedTimeSlotSessions = tempData.filter(s => 
+                s.schedule_type === 'theory' &&
+                s.day === newSession.day &&
+                s.time_slot === newSession.time_slot &&
+                s.group_name === newSession.group_name &&
+                s.course_code === newSession.course_code &&
+                s !== newSession
+            );
+            if (excludedTimeSlotSessions.length > 0) {
+                console.log(`🔍 Excluded ${excludedTimeSlotSessions.length} sessions with same course code and group from time slot exclusivity:`);
+                excludedTimeSlotSessions.forEach(s => {
+                    console.log(`   Excluded: ${s.course_code} (index: ${s.sessionIndex}) at ${s.time_slot}`);
+                });
+            }
             
             sameGroupTheoryConflicts.forEach(conflictSession => {
                 conflicts.push({
-                    type: 'same_group_theory_conflict',
-                    message: `Group ${newSession.group_name} already has theory session ${conflictSession.course_code} at ${newTimeKey}`,
+                    type: 'duplicate_theory_course_in_group',
+                    message: `Group ${newSession.group_name} already has the same theory course ${conflictSession.course_code} at ${newTimeKey}`,
                     conflictingSession: conflictSession,
                     details: {
-                        rule: 'Same Group Theory Exclusivity',
+                        rule: 'Duplicate Course Prevention',
                         conflictingSession: `${conflictSession.course_code} - ${conflictSession.group_name}`,
                         timeSlot: newTimeKey,
                         day: newSession.day,
-                        reason: 'Same group cannot have multiple theory sessions at same time'
+                        reason: 'Same course cannot be scheduled twice for same group at same time'
                     }
                 });
             });
@@ -1413,20 +1441,22 @@ class AllocationManager {
                 s.schedule_type === 'lab' &&
                 s.day === newSession.day &&
                 this.doTimeSlotsOverlap(newSession, s) &&
-                s.group_name === newSession.group_name  // Same group only
+                s.group_name === newSession.group_name &&  // Same group only
+                // ✅ MODIFIED: Only flag if it's the exact same course (not different courses)
+                s.course_code === newSession.course_code
             );
             
             sameGroupLabConflicts.forEach(conflictSession => {
                 conflicts.push({
-                    type: 'same_group_lab_conflict',
-                    message: `Group ${newSession.group_name} already has lab session ${conflictSession.course_code} at overlapping time`,
+                    type: 'duplicate_course_theory_lab_conflict',
+                    message: `Group ${newSession.group_name} already has the same course ${conflictSession.course_code} as lab at ${newTimeKey}`,
                     conflictingSession: conflictSession,
                     details: {
-                        rule: 'Same Group Lab Overlap Prevention',
-                        conflictingSession: `${conflictSession.course_code} - ${conflictSession.group_name}`,
+                        rule: 'Duplicate Course Prevention',
+                        conflictingSession: `${conflictSession.course_code} (lab) - ${conflictSession.group_name}`,
                         timeSlot: newTimeKey,
                         day: newSession.day,
-                        reason: 'Same group cannot have overlapping lab sessions'
+                        reason: 'Same course cannot have both theory and lab sessions at same time for same group'
                     }
                 });
             });
@@ -1442,7 +1472,9 @@ class AllocationManager {
                 s.schedule_type === 'lab' &&
                 s.day === newSession.day &&
                 s.group_name === newSession.group_name &&  // Same group only
-                this.doTimeSlotsOverlap(newSession, s)
+                this.doTimeSlotsOverlap(newSession, s) &&
+                // ✅ MODIFIED: Only flag if it's the exact same course (not different courses)
+                s.course_code === newSession.course_code
             );
             
             sameGroupLabConflicts.forEach(conflictSession => {
@@ -1488,24 +1520,24 @@ class AllocationManager {
 
         if (groupSessions.length > 0) {
             groupSessions.forEach(session => {
-                // ✅ NEW LOGIC: Only flag if it's the exact same course
+                // ✅ UPDATED LOGIC: Only flag if it's the exact same course
                 if (session.course_code === newSession.course_code && 
                     session.schedule_type === newSession.schedule_type) {
-                conflicts.push({
+                    conflicts.push({
                         type: 'duplicate_course_in_group',
                         message: `Group ${newSession.group_name} already has the same course ${session.course_code} (${session.schedule_type}) at this time`,
-                    conflictingSession: session,
-                    details: {
-                        currentSession: `${newSession.course_code} (${newSession.schedule_type})`,
-                        conflictingSession: `${session.course_code} (${session.schedule_type})`,
-                        timeSlot: this.getTimeKey(session),
-                        day: session.day,
+                        conflictingSession: session,
+                        details: {
+                            currentSession: `${newSession.course_code} (${newSession.schedule_type})`,
+                            conflictingSession: `${session.course_code} (${session.schedule_type})`,
+                            timeSlot: this.getTimeKey(session),
+                            day: session.day,
                             group: session.group_name,
                             reason: 'Exact same course cannot be duplicated for same group'
                         }
                     });
                 } else {
-                    // ✅ DIFFERENT COURSES: Add as informational warning only
+                    // ✅ DIFFERENT COURSES: Add as informational warning only (not a conflict)
                     warnings.push({
                         type: 'multiple_courses_in_group',
                         message: `Group ${newSession.group_name} has multiple courses at this time: ${newSession.course_code} and ${session.course_code}`,
