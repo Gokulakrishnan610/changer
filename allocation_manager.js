@@ -6,6 +6,11 @@ class AllocationManager {
         this.theoryData = [];
         this.allData = [];
         this.conflicts = [];
+        this.isInitialized = false;
+        this.loadingProgress = 0;
+        this.currentPage = 0;
+        this.pageSize = userState?.getPreferences()?.pageSize || 50;
+        
         this.validationRules = {
             teacherConflicts: true,
             roomConflicts: true,
@@ -96,31 +101,269 @@ class AllocationManager {
         };
     }
 
-    // Load existing schedule data
-    async loadScheduleData() {
+    // Load existing schedule data with performance optimization and fallback
+    async loadScheduleData(options = {}) {
         try {
+            console.log('📊 Starting allocation manager data loading...');
+            
+            // Check if we should use cached data
+            const useCache = options.useCache !== false;
+            const forceReload = options.forceReload === true;
+            
+            if (useCache && !forceReload && this.isInitialized) {
+                console.log('✅ Using cached data');
+                return { success: true, message: 'Using cached schedule data' };
+            }
+            
+            // Safely update user state (with fallback if not available)
+            this.safeUpdateUserState({ isLoading: true, loadingProgress: 0, error: null });
+            this.safeSetCurrentPage('allocation');
+            
+            // Use simple loading approach first (fallback to old method)
+            console.log('🔄 Loading data files...');
+            this.updateLoadingProgress(10);
+            
             const [labRes, theoryRes] = await Promise.all([
                 fetch('./output/combined_lab_schedule.json'),
                 fetch('./output/combined_theory_schedule.json')
             ]);
             
+            if (!labRes.ok || !theoryRes.ok) {
+                throw new Error(`Failed to fetch data files. Lab: ${labRes.status}, Theory: ${theoryRes.status}`);
+            }
+            
+            this.updateLoadingProgress(40);
+            console.log('📊 Parsing JSON data...');
+            
             this.labData = await labRes.json();
             this.theoryData = await theoryRes.json();
             this.allData = [...this.labData, ...this.theoryData];
             
+            console.log(`✅ Loaded ${this.labData.length} lab sessions and ${this.theoryData.length} theory sessions`);
+            this.updateLoadingProgress(70);
+            
+            // Process data with performance optimization if available, otherwise use standard processing
+            if (typeof performanceOptimizer !== 'undefined' && this.allData.length > 500) {
+                console.log('⚡ Using optimized data processing...');
+                await this.processDataInChunks();
+            } else {
+                console.log('🔄 Using standard data processing...');
+                await this.processDataStandard();
+            }
+            
+            this.updateLoadingProgress(100);
+            this.isInitialized = true;
+            
+            this.safeUpdateUserState({ 
+                isLoading: false, 
+                loadingProgress: 100,
+                lastLoaded: Date.now()
+            });
+            
+            console.log('✅ Allocation manager data loaded successfully');
+            return { success: true, message: 'Schedule data loaded successfully' };
+            
+        } catch (error) {
+            console.error('❌ Error loading allocation manager data:', error);
+            this.safeUpdateUserState({ 
+                isLoading: false, 
+                error: error.message 
+            });
+            
+            // Try to provide more specific error information
+            let errorMessage = 'Failed to load schedule data';
+            if (error.message.includes('fetch')) {
+                errorMessage += ' - Network error or files not found';
+            } else if (error.message.includes('JSON')) {
+                errorMessage += ' - Invalid JSON format';
+            } else {
+                errorMessage += ` - ${error.message}`;
+            }
+            
+            return { success: false, message: errorMessage, error };
+        }
+    }
+    
+    // Safe wrapper for user state updates
+    safeUpdateUserState(dataState) {
+        try {
+            if (typeof userState !== 'undefined' && userState) {
+                userState.updateDataState(dataState);
+            }
+        } catch (error) {
+            console.warn('Could not update user state:', error);
+        }
+    }
+    
+    // Safe wrapper for setting current page
+    safeSetCurrentPage(page) {
+        try {
+            if (typeof userState !== 'undefined' && userState) {
+                userState.setCurrentPage(page);
+            }
+        } catch (error) {
+            console.warn('Could not set current page:', error);
+        }
+    }
+    
+    // Standard data processing (fallback)
+    async processDataStandard() {
+        console.log('🔄 Processing data using standard method...');
+            
             // Enhanced data processing (matching Python scheduler)
             this.extractUniqueValues();
+        this.updateLoadingProgress(75);
+        
             this.identifyCrossDepartmentTeachers();
             this.setupDepartmentDayPatterns();
             this.initializeGlobalRoomRegistry();
+        this.updateLoadingProgress(85);
             
-            // Perform comprehensive conflict detection
+        // Perform conflict detection immediately for initial display
+        console.log('🔍 Starting immediate conflict detection...');
             this.detectAllConflicts();
+        console.log(`✅ Conflict detection completed - found ${this.conflicts.length} conflicts`);
+        
+        // Notify UI to update
+        this.notifyConflictDetectionComplete();
+        
+        this.updateLoadingProgress(90);
+    }
+    
+    // Process data in chunks to avoid blocking UI
+    async processDataInChunks() {
+        try {
+            console.log('⚡ Processing data in optimized chunks...');
             
-            return { success: true, message: 'Schedule data loaded successfully' };
+            if (typeof performanceOptimizer === 'undefined') {
+                console.warn('Performance optimizer not available, falling back to standard processing');
+                return await this.processDataStandard();
+            }
+            
+            // Enhanced data processing (matching Python scheduler)
+            await performanceOptimizer.processDataInChunks(
+                [this.allData],
+                async (chunks) => {
+                    this.extractUniqueValues();
+                    return chunks;
+                },
+                (progress) => {
+                    this.updateLoadingProgress(80 + (progress.percentage * 0.05));
+                }
+            );
+            
+            await performanceOptimizer.processDataInChunks(
+                [this.allData],
+                async (chunks) => {
+                    this.identifyCrossDepartmentTeachers();
+                    this.setupDepartmentDayPatterns();
+                    this.initializeGlobalRoomRegistry();
+                    return chunks;
+                },
+                (progress) => {
+                    this.updateLoadingProgress(85 + (progress.percentage * 0.05));
+                }
+            );
+            
+            // Perform conflict detection immediately for initial display
+            console.log('🔍 Starting immediate conflict detection...');
+            this.detectAllConflicts();
+            console.log(`✅ Conflict detection completed - found ${this.conflicts.length} conflicts`);
+            
+            // Notify UI to update
+            this.notifyConflictDetectionComplete();
+            
         } catch (error) {
-            console.error('Error loading schedule data:', error);
-            return { success: false, message: 'Failed to load schedule data', error };
+            console.error('Error in chunked processing, falling back to standard:', error);
+            await this.processDataStandard();
+        }
+    }
+    
+    // Asynchronous conflict detection to avoid blocking UI
+    async detectAllConflictsAsync() {
+        console.log('🔍 Starting background conflict detection...');
+        
+        try {
+            if (typeof performanceOptimizer !== 'undefined' && this.allData.length > 500) {
+                // Use optimized processing for large datasets
+                await performanceOptimizer.processDataInChunks(
+                    this.allData,
+                    async (sessionChunk) => {
+                        // Process conflicts for this chunk
+                        sessionChunk.forEach((session, index) => {
+                            const conflicts = this.getSessionConflicts(index);
+                            if (conflicts.length > 0) {
+                                this.conflicts.push(...conflicts);
+                            }
+                        });
+                        return sessionChunk;
+                    },
+                    (progress) => {
+                        console.log(`Conflict detection progress: ${progress.percentage.toFixed(1)}%`);
+                    }
+                );
+            } else {
+                // Fallback to standard conflict detection
+                console.log('🔍 Using standard conflict detection...');
+                this.detectAllConflicts();
+            }
+            
+            console.log(`✅ Conflict detection complete. Found ${this.conflicts.length} conflicts`);
+            this.notifyConflictDetectionComplete();
+            
+        } catch (error) {
+            console.error('❌ Error in background conflict detection, using fallback:', error);
+            // Fallback to standard method
+            try {
+                this.detectAllConflicts();
+                console.log(`✅ Fallback conflict detection complete. Found ${this.conflicts.length} conflicts`);
+                this.notifyConflictDetectionComplete();
+            } catch (fallbackError) {
+                console.error('❌ Even fallback conflict detection failed:', fallbackError);
+            }
+        }
+    }
+    
+    // Update loading progress UI
+    updateLoadingProgress(progress = null) {
+        if (progress !== null) {
+            this.loadingProgress = progress;
+        }
+        
+        this.safeUpdateUserState({ loadingProgress: this.loadingProgress });
+        
+        // Update progress bar if it exists
+        const progressBar = document.querySelector('.loading-progress-bar');
+        if (progressBar) {
+            progressBar.style.width = `${this.loadingProgress}%`;
+            progressBar.setAttribute('aria-valuenow', this.loadingProgress);
+        }
+        
+        // Update progress text if it exists
+        const progressText = document.querySelector('.loading-progress-text');
+        if (progressText) {
+            if (this.loadingProgress < 100) {
+                progressText.textContent = `Loading allocation manager... ${Math.round(this.loadingProgress)}%`;
+            } else {
+                progressText.textContent = 'Loading complete!';
+            }
+        }
+    }
+    
+    // Notify when conflict detection is complete
+    notifyConflictDetectionComplete() {
+        const event = new CustomEvent('conflictDetectionComplete', {
+            detail: { conflicts: this.conflicts.length }
+        });
+        document.dispatchEvent(event);
+        
+        // Update UI if conflicts panel exists
+        if (typeof renderConflicts === 'function') {
+            console.log(`🔄 Updating conflicts display - found ${this.conflicts.length} conflicts`);
+            renderConflicts();
+            console.log('✅ Conflicts display updated');
+        } else {
+            console.warn('⚠️ renderConflicts function not available');
         }
     }
     
@@ -610,6 +853,65 @@ class AllocationManager {
         }
     }
 
+    // ✅ UPDATED: Detect time slot exclusivity conflicts (Fixed - no false positives)
+    detectTimeSlotExclusivityConflicts() {
+        console.log('🕐 Detecting same-group time slot conflicts only...');
+        
+        // REMOVED: Global Theory-Lab exclusivity and Theory Single Group rules
+        // These were causing false positives for different departments/semesters
+        
+        // Only check for conflicts within the same group
+        const groupMap = {};
+        
+        // Group sessions by group name and day
+        this.allData.forEach((session, index) => {
+            const groupKey = `${session.group_name}_${session.day}`;
+            if (!groupMap[groupKey]) {
+                groupMap[groupKey] = [];
+            }
+            groupMap[groupKey].push({ session, index });
+        });
+        
+        // Check each group for internal conflicts only
+        Object.entries(groupMap).forEach(([groupKey, sessions]) => {
+            const [groupName, day] = groupKey.split('_');
+            
+            // Check for overlapping sessions within the same group
+            for (let i = 0; i < sessions.length; i++) {
+                for (let j = i + 1; j < sessions.length; j++) {
+                    const session1 = sessions[i].session;
+                    const session2 = sessions[j].session;
+                    
+                    // Check if sessions overlap in time
+                    if (this.doTimeSlotsOverlap(session1, session2)) {
+                        // Different session types within same group = conflict
+                        if (session1.schedule_type !== session2.schedule_type) {
+                    this.conflicts.push({
+                                type: 'same_group_mixed_session_overlap',
+                                severity: 'high',
+                                message: `Group ${groupName}: ${session1.schedule_type} session ${session1.course_code} overlaps with ${session2.schedule_type} session ${session2.course_code}`,
+                                sessions: [
+                                    { ...session1, originalIndex: sessions[i].index },
+                                    { ...session2, originalIndex: sessions[j].index }
+                                ],
+                        details: {
+                                    rule: 'Same Group Session Overlap Prevention',
+                                    group: groupName,
+                            day: day,
+                                    session1: `${session1.course_code} (${session1.schedule_type})`,
+                                    session2: `${session2.course_code} (${session2.schedule_type})`,
+                                    reason: 'Same group cannot have overlapping sessions of different types'
+                        }
+                    });
+                }
+                    }
+                }
+            }
+        });
+        
+        console.log('✅ Same-group conflict detection completed');
+    }
+
     // Comprehensive conflict detection
     detectAllConflicts() {
         this.conflicts = [];
@@ -684,6 +986,9 @@ class AllocationManager {
                 });
             }
         });
+
+        // ✅ NEW: Detect time slot exclusivity conflicts (User Requested Rules)
+        this.detectTimeSlotExclusivityConflicts();
         
         // 🎯 COMPREHENSIVE group conflict detection with ALL combined_scheduler.py rules
         groupSlots.forEach((sessions, key) => {
@@ -748,6 +1053,12 @@ class AllocationManager {
                             return { allowed: true, reason: "Large course capacity splitting", rule: "Virtual instances for 140+ students" };
                         }
                         
+                        // ✅ RULE 7: Different courses in same group - ALLOWED (User Request)
+                        // This allows split groups, electives, and specialized tracks
+                        if (uniqueCourseCodes.length > 1) {
+                            return { allowed: true, reason: "Different courses allowed in same group", rule: "Split groups/electives/tracks allowance" };
+                        }
+                        
                         // ✅ RULE 8: Large lab co-scheduling (140+ capacity rooms)
                         const isLargeLab = maxCapacity >= 140;
                         const allLabSessions = allSessions.every(s => s.schedule_type === 'lab');
@@ -792,7 +1103,10 @@ class AllocationManager {
                                     ['MA', 'CS'], // Mathematics & Computer Science
                                     ['MA', 'ME'], // Mathematics & Mechanical Engineering
                                     ['EC', 'EE'], // Electronics & Electrical
-                                    ['ME', 'CE']  // Mechanical & Civil (if applicable)
+                                    ['ME', 'CE'], // Mechanical & Civil
+                                    ['BM', 'CS'], // Biomedical & Computer Science
+                                    ['BM', 'EC'], // Biomedical & Electronics
+                                    ['BM', 'ME']  // Biomedical & Mechanical
                                 ];
                                 
                                 const sortedPrefixes = [...prefixes].sort();
@@ -807,11 +1121,11 @@ class AllocationManager {
                             }
                         }
                         
-                        // ✅ ALLOW: Different courses in same group are now allowed
+                        // ✅ DEFAULT: Allow different courses in same group (per user request)
                         return { 
                             allowed: true, 
                             reason: "Different courses allowed in same group", 
-                            rule: "Removed group conflict constraint per user request" 
+                            rule: "University scheduling flexibility" 
                         };
                     };
                     
@@ -826,12 +1140,23 @@ class AllocationManager {
                         console.log(`✅ Co-scheduling allowed: ${sessions[0].session.group_name} - ${validationResult.reason} (${validationResult.rule})`);
                         console.log(`   Courses: ${uniqueCourseCodes.join(', ')} at ${sessions[0].session.day} ${this.getTimeKey(sessions[0].session)}`);
                     } else {
-                        // ✅ ALLOW: Different courses in same group are now allowed
-                        sessions.forEach(s => {
-                            s.session.is_different_course_allowed = true;
-                            s.session.co_schedule_info = `✅ ${validationResult.reason} (${validationResult.rule})`;
+                        // ❌ CONFLICT: This should rarely happen now since we allow most group scenarios
+                        this.conflicts.push({
+                            type: 'group_conflict',
+                            severity: 'medium',  // Reduced severity since group conflicts are now less critical
+                            message: `Group ${sessions[0].session.group_name} has unusual scheduling: ${sessions.length} courses at the same time`,
+                            sessions: sessions.map(s => ({ ...s.session, originalIndex: s.index })),
+                            details: {
+                                group: sessions[0].session.group_name,
+                                day: sessions[0].session.day,
+                                time: this.getTimeKey(sessions[0].session),
+                                courses: uniqueCourseCodes,
+                                conflictingSessions: sessions.length,
+                                reason: validationResult.reason,
+                                rule: validationResult.rule
+                            }
                         });
-                        console.log(`✅ Different courses allowed: ${sessions[0].session.group_name} - ${validationResult.reason} (${validationResult.rule})`);
+                        console.log(`⚠️ Unusual group scheduling: ${sessions[0].session.group_name} - ${validationResult.reason} (${validationResult.rule})`);
                         console.log(`   Courses: ${uniqueCourseCodes.join(', ')} at ${sessions[0].session.day} ${this.getTimeKey(sessions[0].session)}`);
                     }
                 }
@@ -885,6 +1210,7 @@ class AllocationManager {
         const conflictChecks = [
             this.checkTeacherAvailability(newSession, tempData),
             this.checkRoomAvailability(newSession, tempData),
+            this.checkTimeSlotExclusivity(newSession, tempData),  // ✅ NEW: Time slot exclusivity rules
             this.checkGroupAvailability(newSession, tempData),
             this.checkCapacityLimits(newSession),
             this.checkTimeSlotValidity(newSession)
@@ -953,33 +1279,91 @@ class AllocationManager {
         };
     }
 
-    // ❌ STRICT GROUP RULE: No group should have overlapping sessions
-    // - Lab and theory groups cannot overlap in time
-    // - Any group overlap is treated as a conflict
-    // - No exceptions or co-scheduling allowed
-    checkGroupAvailability(newSession, tempData) {
+    // ✅ UPDATED: Check time slot exclusivity rules (Fixed to avoid false positives)
+    checkTimeSlotExclusivity(newSession, tempData) {
         const conflicts = [];
         
-        const groupSessions = tempData.filter(s => 
-            s.group_name === newSession.group_name &&
-            s.day === newSession.day &&
-            s !== newSession &&
-            this.doTimeSlotsOverlap(newSession, s)
-        );
-
-        if (groupSessions.length > 0) {
-            // ❌ STRICT RULE: No group overlaps allowed
-            groupSessions.forEach(session => {
+        // Get time key for the new session
+        const newTimeKey = this.getTimeKey(newSession);
+        
+        // REMOVED: Theory-Lab Global Exclusivity rule - was causing false positives
+        // Different departments/semesters can have lab and theory sessions simultaneously
+        
+        // Rule 1: Theory sessions within same group/department
+        // Check if the same group already has a theory session at this time
+        if (newSession.schedule_type === 'theory') {
+            const sameGroupTheoryConflicts = tempData.filter(s => 
+                s !== newSession &&
+                s.schedule_type === 'theory' &&
+                s.day === newSession.day &&
+                s.time_slot === newSession.time_slot &&
+                s.group_name === newSession.group_name  // Same group only
+            );
+            
+            sameGroupTheoryConflicts.forEach(conflictSession => {
                 conflicts.push({
-                    type: 'group_conflict',
-                    message: `Group ${newSession.group_name} already has a session at this time: ${session.course_code} (${session.schedule_type}) with ${session.teacher_name} in room ${session.room_number}`,
-                    conflictingSession: session,
+                    type: 'same_group_theory_conflict',
+                    message: `Group ${newSession.group_name} already has theory session ${conflictSession.course_code} at ${newTimeKey}`,
+                    conflictingSession: conflictSession,
                     details: {
-                        currentSession: `${newSession.course_code} (${newSession.schedule_type})`,
-                        conflictingSession: `${session.course_code} (${session.schedule_type})`,
-                        timeSlot: this.getTimeKey(session),
-                        day: session.day,
-                        group: session.group_name
+                        rule: 'Same Group Theory Exclusivity',
+                        conflictingSession: `${conflictSession.course_code} - ${conflictSession.group_name}`,
+                        timeSlot: newTimeKey,
+                        day: newSession.day,
+                        reason: 'Same group cannot have multiple theory sessions at same time'
+                    }
+                });
+            });
+        }
+        
+        // Rule 2: Lab sessions within same group/department  
+        // Check if the same group already has a lab session at this time
+        if (newSession.schedule_type === 'lab') {
+            const sameGroupLabConflicts = tempData.filter(s => 
+                s !== newSession &&
+                s.schedule_type === 'lab' &&
+                s.day === newSession.day &&
+                this.doTimeSlotsOverlap(newSession, s) &&
+                s.group_name === newSession.group_name  // Same group only
+            );
+            
+            sameGroupLabConflicts.forEach(conflictSession => {
+                conflicts.push({
+                    type: 'same_group_lab_conflict',
+                    message: `Group ${newSession.group_name} already has lab session ${conflictSession.course_code} at overlapping time`,
+                    conflictingSession: conflictSession,
+                    details: {
+                        rule: 'Same Group Lab Overlap Prevention',
+                        conflictingSession: `${conflictSession.course_code} - ${conflictSession.group_name}`,
+                        timeSlot: newTimeKey,
+                        day: newSession.day,
+                        reason: 'Same group cannot have overlapping lab sessions'
+                    }
+                });
+            });
+        }
+        
+        // Rule 3: Cross-session conflicts only within same group
+        if (newSession.schedule_type === 'theory') {
+            const sameGroupLabConflicts = tempData.filter(s => 
+                s !== newSession &&
+                s.schedule_type === 'lab' &&
+                s.day === newSession.day &&
+                s.group_name === newSession.group_name &&  // Same group only
+                this.doTimeSlotsOverlap(newSession, s)
+            );
+            
+            sameGroupLabConflicts.forEach(conflictSession => {
+                conflicts.push({
+                    type: 'same_group_theory_lab_conflict',
+                    message: `Group ${newSession.group_name} has lab session ${conflictSession.course_code} overlapping with theory session`,
+                    conflictingSession: conflictSession,
+                    details: {
+                        rule: 'Same Group Theory-Lab Overlap Prevention',
+                        conflictingSession: `${conflictSession.course_code} - ${conflictSession.group_name}`,
+                        timeSlot: newTimeKey,
+                        day: newSession.day,
+                        reason: 'Same group cannot have theory and lab sessions at overlapping times'
                     }
                 });
             });
@@ -989,6 +1373,64 @@ class AllocationManager {
             isValid: conflicts.length === 0,
             conflicts: conflicts,
             warnings: []
+        };
+    }
+
+    // ✅ FLEXIBLE GROUP RULE: Allow different courses in same group
+    // - Different courses can run simultaneously (split groups, electives, tracks)
+    // - Only flag if exact same course is duplicated
+    // - Support university scheduling flexibility
+    checkGroupAvailability(newSession, tempData) {
+        const conflicts = [];
+        const warnings = [];
+        
+        const groupSessions = tempData.filter(s => 
+            s.group_name === newSession.group_name &&
+            s.day === newSession.day &&
+            s !== newSession &&
+            this.doTimeSlotsOverlap(newSession, s)
+        );
+
+        if (groupSessions.length > 0) {
+            groupSessions.forEach(session => {
+                // ✅ NEW LOGIC: Only flag if it's the exact same course
+                if (session.course_code === newSession.course_code && 
+                    session.schedule_type === newSession.schedule_type) {
+                    conflicts.push({
+                        type: 'duplicate_course_in_group',
+                        message: `Group ${newSession.group_name} already has the same course ${session.course_code} (${session.schedule_type}) at this time`,
+                        conflictingSession: session,
+                        details: {
+                            currentSession: `${newSession.course_code} (${newSession.schedule_type})`,
+                            conflictingSession: `${session.course_code} (${session.schedule_type})`,
+                            timeSlot: this.getTimeKey(session),
+                            day: session.day,
+                            group: session.group_name,
+                            reason: 'Exact same course cannot be duplicated for same group'
+                        }
+                    });
+                } else {
+                    // ✅ DIFFERENT COURSES: Add as informational warning only
+                    warnings.push({
+                        type: 'multiple_courses_in_group',
+                        message: `Group ${newSession.group_name} has multiple courses at this time: ${newSession.course_code} and ${session.course_code}`,
+                        details: {
+                            currentSession: `${newSession.course_code} (${newSession.schedule_type})`,
+                            existingSession: `${session.course_code} (${session.schedule_type})`,
+                            timeSlot: this.getTimeKey(session),
+                            day: session.day,
+                            group: session.group_name,
+                            reason: 'Split groups, electives, or specialized tracks - this is typically allowed'
+                        }
+                    });
+                }
+            });
+        }
+
+        return {
+            isValid: conflicts.length === 0,
+            conflicts: conflicts,
+            warnings: warnings
         };
     }
 
@@ -1359,6 +1801,35 @@ class AllocationManager {
 // Global allocation manager instance
 window.allocationManager = new AllocationManager();
 
+// Manual conflict detection refresh function
+async function refreshConflictDetection() {
+    if (!allocationManager.allData || allocationManager.allData.length === 0) {
+        showAlert('warning', 'No data loaded to refresh conflicts for');
+        return;
+    }
+
+    try {
+        console.log('🔄 Manually refreshing conflict detection...');
+        
+        // Clear existing conflicts
+        allocationManager.conflicts = [];
+        
+        // Run conflict detection
+        allocationManager.detectAllConflicts();
+        
+        // Update UI
+        renderStatistics();
+        renderConflicts();
+        
+        showAlert('success', `Conflict detection refreshed. Found ${allocationManager.conflicts.length} conflicts.`);
+        console.log(`✅ Manual refresh complete - found ${allocationManager.conflicts.length} conflicts`);
+        
+    } catch (error) {
+        console.error('Error refreshing conflict detection:', error);
+        showAlert('error', 'Failed to refresh conflict detection: ' + error.message);
+    }
+}
+
 // Manual duplicate cleaning function
 async function cleanDuplicates() {
     if (!allocationManager.allData || allocationManager.allData.length === 0) {
@@ -1389,35 +1860,125 @@ async function cleanDuplicates() {
 let currentEditingSession = null;
 
 async function initializeAllocationManager() {
+    console.log('🚀 Initializing Allocation Manager...');
+    
     try {
         // Show loading state
         document.getElementById('loadingState').classList.remove('d-none');
         document.getElementById('mainContent').classList.add('d-none');
 
-        // Load schedule data
+        // Initialize allocation manager instance
+        if (!window.allocationManager) {
+            console.log('📊 Creating AllocationManager instance...');
+            window.allocationManager = new AllocationManager();
+        }
+
+        // Load schedule data with detailed progress
+        console.log('📥 Loading schedule data...');
         const result = await allocationManager.loadScheduleData();
         
         if (result.success) {
+            console.log('✅ Data loaded successfully, initializing UI...');
+            
             // Hide loading and show main content
             document.getElementById('loadingState').classList.add('d-none');
             document.getElementById('mainContent').classList.remove('d-none');
             
             // Initialize UI components
+            console.log('🎨 Rendering UI components...');
             renderStatistics();
             renderConflicts();
             setupEventListeners();
             
-            console.log('Allocation Manager initialized successfully');
+            // Add conflict detection completion listener
+            document.addEventListener('conflictDetectionComplete', (event) => {
+                console.log(`🔍 Conflict detection completed: ${event.detail.conflicts} conflicts found`);
+                renderConflicts(); // Refresh conflicts display
+                renderStatistics(); // Update statistics
+            });
+            
+            console.log('✅ Allocation Manager initialized successfully');
         } else {
-            throw new Error(result.message);
+            throw new Error(result.message || 'Unknown error during data loading');
         }
     } catch (error) {
-        console.error('Failed to initialize Allocation Manager:', error);
+        console.error('❌ Failed to initialize Allocation Manager:', error);
+        
+        // Provide detailed error information and troubleshooting
+        let errorDetails = error.message || 'Unknown error occurred';
+        let troubleshootingTips = '';
+        
+        if (errorDetails.includes('fetch') || errorDetails.includes('Network') || errorDetails.includes('files not found')) {
+            troubleshootingTips = `
+                <div class="mt-3">
+                    <h6><i class="fas fa-tools me-2"></i>Troubleshooting Tips:</h6>
+                    <ul class="text-start small">
+                        <li>Verify that <code>combined_lab_schedule.json</code> and <code>combined_theory_schedule.json</code> exist in the <code>./output/</code> directory</li>
+                        <li>Ensure the web server is running and serving files correctly</li>
+                        <li>Check browser console (F12) for more detailed network errors</li>
+                        <li>Try refreshing the page or clearing browser cache</li>
+                    </ul>
+                </div>
+            `;
+        } else if (errorDetails.includes('JSON')) {
+            troubleshootingTips = `
+                <div class="mt-3">
+                    <h6><i class="fas fa-tools me-2"></i>Troubleshooting Tips:</h6>
+                    <ul class="text-start small">
+                        <li>The data files may be corrupted or have invalid JSON format</li>
+                        <li>Check the browser console (F12) for detailed JSON parsing errors</li>
+                        <li>Try regenerating the schedule data files using the scheduler</li>
+                        <li>Validate JSON files using an online JSON validator</li>
+                    </ul>
+                </div>
+            `;
+        } else {
+            troubleshootingTips = `
+                <div class="mt-3">
+                    <h6><i class="fas fa-tools me-2"></i>Troubleshooting Tips:</h6>
+                    <ul class="text-start small">
+                        <li>Check browser console (F12) for detailed error messages</li>
+                        <li>Ensure all required JavaScript files are loaded properly</li>
+                        <li>Try accessing the scheduler page first to verify data integrity</li>
+                        <li>Contact system administrator if the problem persists</li>
+                    </ul>
+                </div>
+            `;
+        }
+        
         document.getElementById('loadingState').innerHTML = `
-            <div class="alert alert-danger">
+            <div class="alert alert-danger text-center">
+                <div class="mb-3">
+                    <i class="fas fa-exclamation-triangle fa-3x text-danger"></i>
+                </div>
                 <h4>Error Loading Data</h4>
-                <p>${error.message}</p>
+                <p class="mb-3"><strong>${errorDetails}</strong></p>
                 <p>Please ensure the schedule data files are available and try refreshing the page.</p>
+                ${troubleshootingTips}
+                                 <div class="mt-4">
+                     <button class="btn btn-primary me-2" onclick="location.reload()">
+                         <i class="fas fa-refresh me-1"></i>
+                         Refresh Page
+                     </button>
+                     <button class="btn btn-secondary me-2" onclick="initializeAllocationManager()">
+                         <i class="fas fa-redo me-1"></i>
+                         Retry Loading
+                     </button>
+                     <a href="schedule_website.html" class="btn btn-info me-2">
+                         <i class="fas fa-calendar me-1"></i>
+                         Go to Scheduler
+                     </a>
+                     <a href="diagnostics.html" class="btn btn-warning">
+                         <i class="fas fa-stethoscope me-1"></i>
+                         Run Diagnostics
+                     </a>
+                 </div>
+                <div class="mt-3">
+                    <small class="text-muted">
+                        <i class="fas fa-info-circle me-1"></i>
+                        Check browser console (F12 → Console) for detailed technical information
+                    </small>
+                </div>
             </div>
         `;
     }

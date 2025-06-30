@@ -662,9 +662,16 @@
                 <div class="col-md-12">
                     <div class="alert alert-info mb-3">
                         <i class="fas fa-lightbulb me-2"></i>
-                        <strong>Enhanced Scheduling System (Based on combined_scheduler.py):</strong> 
+                        <strong>Enhanced Scheduling System :</strong> 
                         <ul class="mb-0 mt-2">
                             <li><strong>Drag & Drop:</strong> Intelligent session movement with comprehensive conflict prevention</li>
+                            <li><strong>❌ CRITICAL: Time Slot Exclusivity Rules:</strong>
+                                <ul class="mt-1">
+                                    <li><span class="text-danger">Theory-Lab Global Exclusivity:</span> If ANY group has theory at a time slot, NO group can have lab</li>
+                                    <li><span class="text-danger">Theory Single Group Rule:</span> Only ONE group can have theory at any time slot</li>
+                                    <li><span class="text-danger">Lab-Theory Overlap Prevention:</span> Lab sessions cannot conflict with any theory sessions</li>
+                                </ul>
+                            </li>
                             <li><strong>Cross-Schedule Validation:</strong> Prevents conflicts between lab and theory sessions</li>
                             <li><strong>Department Day Patterns:</strong> Respects Monday-Friday vs Tuesday-Saturday scheduling</li>
                             <li><strong>Shift-Based Constraints:</strong> Enforces 3-shift time patterns across departments</li>
@@ -814,9 +821,69 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- User State Management & Performance Optimization -->
+    <script src="user-state-manager.js"></script>
+    <script src="performance-optimizer.js"></script>
+    
+    <!-- Main Application -->
     <script src="schedule_viewer.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', loadData);
+        
+        // Listen for user state changes
+        if (typeof userState !== 'undefined') {
+            userState.addEventListener('dataStateChanged', (dataState) => {
+                if (dataState.isLoading) {
+                    showLoadingProgress(dataState.loadingProgress);
+                } else {
+                    hideLoadingProgress();
+                }
+            });
+        }
+        
+        function showLoadingProgress(progress) {
+            // Show loading indicator if it doesn't exist
+            let loadingDiv = document.getElementById('loadingIndicator');
+            if (!loadingDiv) {
+                loadingDiv = document.createElement('div');
+                loadingDiv.id = 'loadingIndicator';
+                loadingDiv.className = 'text-center py-4';
+                loadingDiv.innerHTML = `
+                    <div class="spinner-border text-primary mb-3" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <div class="progress mb-3" style="max-width: 400px; margin: 0 auto;">
+                        <div class="progress-bar" role="progressbar" style="width: 0%" 
+                             aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                    </div>
+                    <p class="loading-text">Loading schedule data...</p>
+                `;
+                document.body.appendChild(loadingDiv);
+            }
+            
+            // Update progress
+            const progressBar = loadingDiv.querySelector('.progress-bar');
+            const loadingText = loadingDiv.querySelector('.loading-text');
+            
+            if (progressBar) {
+                progressBar.style.width = `${progress}%`;
+                progressBar.setAttribute('aria-valuenow', progress);
+            }
+            
+            if (loadingText) {
+                loadingText.textContent = `Loading schedule data... ${Math.round(progress)}%`;
+            }
+            
+            loadingDiv.style.display = 'block';
+        }
+        
+        function hideLoadingProgress() {
+            const loadingDiv = document.getElementById('loadingIndicator');
+            if (loadingDiv) {
+                loadingDiv.style.display = 'none';
+            }
+        }
     </script>
 </body>
 </html> 

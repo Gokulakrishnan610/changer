@@ -1,6 +1,11 @@
 let labData = [], theoryData = [], allData = [], teacherShiftData = {};
 let days = ['tuesday', 'wed', 'thur', 'fri', 'saturday'];
 
+// Initialize user state for schedule viewer
+if (typeof userState !== 'undefined') {
+    userState.setCurrentPage('schedule');
+}
+
 // Time slots for theory sessions (50-minute slots)
 const timeSlots = [
     "8:00 - 8:50", "9:00 - 9:50", "10:00 - 10:50", "11:00 - 11:50",
@@ -19,6 +24,26 @@ const getSemesterFromGroupName = (name) => name ? `S${name.match(/_S(\d+)_/)?.[1
 
 async function loadData() {
     try {
+        console.log('📊 Loading schedule data with user state management...');
+        
+        // Update user state
+        if (typeof userState !== 'undefined') {
+            userState.updateDataState({ isLoading: true, loadingProgress: 0, error: null });
+        }
+        
+        // Check if data is already cached and fresh
+        const dataState = userState?.getDataState();
+        const cacheTimeout = 5 * 60 * 1000; // 5 minutes
+        const isCacheFresh = dataState?.lastLoaded && 
+                           (Date.now() - dataState.lastLoaded) < cacheTimeout;
+        
+        if (isCacheFresh && labData.length > 0 && theoryData.length > 0) {
+            console.log('✅ Using cached data');
+            userState?.updateDataState({ isLoading: false, loadingProgress: 100 });
+            initializeUI();
+            return;
+        }
+        
         // Load files directly from the output directory
         const [labPath, theoryPath, shiftPath] = [
             './output/combined_lab_schedule.json',
@@ -29,51 +54,129 @@ async function loadData() {
             './output/daily_campus_presence_latest.json',
         ];
 
+        // Update progress
+        userState?.updateDataState({ loadingProgress: 10 });
+
         const [labRes, theoryRes, shiftRes] = await Promise.all([
                 fetch(labPath),
                 fetch(theoryPath),                
                 fetch(shiftPath).catch(() => null) // Handle potential missing file
             ]);
 
+        userState?.updateDataState({ loadingProgress: 40 });
+
         labData = await labRes.json();
-            theoryData = await theoryRes.json();
-            allData = [...labData, ...theoryData];
-            
-            // Fix room capacities: Set default capacity of 70 for theory rooms, 35 for lab rooms
+        theoryData = await theoryRes.json();
+        allData = [...labData, ...theoryData];
+        
+        userState?.updateDataState({ loadingProgress: 70 });
+        
+        // Process data in chunks for better performance
+        if (typeof performanceOptimizer !== 'undefined') {
+            await performanceOptimizer.processDataInChunks(
+                allData,
+                async (sessionChunk) => {
+                    // Fix room capacities for this chunk
+                    sessionChunk.forEach(session => {
+                        if (session.room_number && (!session.capacity || session.capacity === null)) {
+                            const roomType = getRoomType(session.room_number);
+                            session.capacity = roomType === 'theory' ? 70 : 35;
+                        }
+                    });
+                    return sessionChunk;
+                },
+                (progress) => {
+                    userState?.updateDataState({ 
+                        loadingProgress: 70 + (progress.percentage * 0.2) 
+                    });
+                }
+            );
+        } else {
+            // Fallback to synchronous processing
             allData.forEach(session => {
                 if (session.room_number && (!session.capacity || session.capacity === null)) {
                     const roomType = getRoomType(session.room_number);
                     session.capacity = roomType === 'theory' ? 70 : 35;
                 }
             });
-            
-            // Update the original arrays as well
-            labData.forEach(session => {
-                if (session.room_number && (!session.capacity || session.capacity === null)) {
-                    session.capacity = 35; // Lab rooms default to 35
-                }
-            });
-            
-            theoryData.forEach(session => {
-                if (session.room_number && (!session.capacity || session.capacity === null)) {
-                    session.capacity = 70; // Theory rooms default to 70
-                }
-            });
-            
-            if (shiftRes && shiftRes.ok) {
-                teacherShiftData = await shiftRes.json();
         }
+        
+        // Update the original arrays as well
+        labData.forEach(session => {
+            if (session.room_number && (!session.capacity || session.capacity === null)) {
+                session.capacity = 35; // Lab rooms default to 35
+            }
+        });
+        
+        theoryData.forEach(session => {
+            if (session.room_number && (!session.capacity || session.capacity === null)) {
+                session.capacity = 70; // Theory rooms default to 70
+            }
+        });
+        
+        if (shiftRes && shiftRes.ok) {
+            teacherShiftData = await shiftRes.json();
+        }
+        
+        userState?.updateDataState({ loadingProgress: 90 });
 
-        // labData = await labPath.json();
-        // theoryData = await theoryPath.json();
-        // shiftData = await shiftPath.json();
-        // allData = [...labData, ...theoryData, ...shiftData];
-        // if (shiftRes && shiftRes.ok) teacherShiftData = await shiftPath.json();
+        // Restore user filters and preferences
+        restoreUserState();
 
         initializeUI();
+        
+        userState?.updateDataState({ 
+            isLoading: false, 
+            loadingProgress: 100,
+            lastLoaded: Date.now()
+        });
+        
+        console.log('✅ Schedule data loaded successfully');
+        
     } catch (error) {
+        console.error('❌ Error loading data:', error);
+        userState?.updateDataState({ 
+            isLoading: false, 
+            error: error.message 
+        });
         document.getElementById('mainContent').innerHTML = `<div class="alert alert-danger text-center">Error loading data: ${error.message}</div>`;
     }
+}
+
+// Restore user state (filters, view preferences, etc.)
+function restoreUserState() {
+    if (typeof userState === 'undefined') return;
+    
+    const filters = userState.getFilters('schedule');
+    const preferences = userState.getPreferences();
+    
+    // Restore filters
+    if (filters.selectedDepartment && filters.selectedDepartment !== 'all') {
+        const deptSelect = document.getElementById('departmentFilter');
+        if (deptSelect) deptSelect.value = filters.selectedDepartment;
+    }
+    
+    if (filters.selectedSemester && filters.selectedSemester !== 'all') {
+        const semesterSelect = document.getElementById('semesterFilter');
+        if (semesterSelect) semesterSelect.value = filters.selectedSemester;
+    }
+    
+    if (filters.selectedDay && filters.selectedDay !== 'all') {
+        const daySelect = document.getElementById('dayFilter');
+        if (daySelect) daySelect.value = filters.selectedDay;
+    }
+    
+    if (filters.viewType && filters.viewType !== 'department') {
+        const viewSelect = document.getElementById('viewType');
+        if (viewSelect) viewSelect.value = filters.viewType;
+    }
+    
+    if (filters.searchQuery) {
+        const searchInput = document.getElementById('searchInput');
+        if (searchInput) searchInput.value = filters.searchQuery;
+    }
+    
+    console.log('✅ User state restored');
 }
 
 // Determine room type based on room number (same logic as allocation manager)
@@ -934,37 +1037,61 @@ function detectConflicts() {
     conflictBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Detecting...';
     conflictBtn.disabled = true;
 
-    // Reset conflicts
-    detectedConflicts = [];
-    clearConflictHighlights();
+    // Use setTimeout to prevent UI blocking for large datasets
+    setTimeout(() => {
+        const startTime = performance.now();
+        
+        // Reset conflicts
+        detectedConflicts = [];
+        clearConflictHighlights();
 
-    // 🔧 STEP 1: Detect and handle duplicates first
-    detectAndHandleDuplicates();
+        // 🔧 STEP 1: Detect and handle duplicates first
+        detectAndHandleDuplicates();
 
-    // Detect different types of conflicts
-    detectTeacherConflicts();
-    detectRoomConflicts();
-    detectGroupConflicts();
-    detectCapacityViolations();
+        // ⚡ OPTIMIZED: Detect conflicts in batches to prevent UI blocking
+        const conflictTypes = [
+            detectTeacherConflicts,
+            detectRoomConflicts,
+            detectTimeSlotExclusivityConflicts,
+            detectGroupConflicts,
+            detectCapacityViolations
+        ];
 
-    // Update UI
-    totalConflicts.textContent = detectedConflicts.length;
-    conflictStats.style.display = detectedConflicts.length > 0 ? 'block' : 'none';
+        // Process conflict detection with micro-delays to keep UI responsive
+        let typeIndex = 0;
+        const processNextType = () => {
+            if (typeIndex < conflictTypes.length) {
+                conflictTypes[typeIndex]();
+                typeIndex++;
+                setTimeout(processNextType, 1); // Micro-delay to keep UI responsive
+            } else {
+                // All conflict types processed
+                const endTime = performance.now();
+                console.log(`⚡ Fast conflict detection completed in ${(endTime - startTime).toFixed(2)}ms`);
+                
+                // Update UI
+                totalConflicts.textContent = detectedConflicts.length;
+                conflictStats.style.display = detectedConflicts.length > 0 ? 'block' : 'none';
 
-    // Show/hide buttons
-    conflictBtn.innerHTML = '<i class="fas fa-exclamation-triangle me-1"></i>Conflicts Found';
-    conflictBtn.disabled = false;
-    clearBtn.style.display = detectedConflicts.length > 0 ? 'inline-block' : 'none';
+                // Show/hide buttons
+                conflictBtn.innerHTML = `<i class="fas fa-exclamation-triangle me-1"></i>${detectedConflicts.length} Conflicts Found`;
+                conflictBtn.disabled = false;
+                clearBtn.style.display = detectedConflicts.length > 0 ? 'inline-block' : 'none';
 
-    // Highlight conflicts in the schedule
-    highlightConflicts();
+                // Highlight conflicts in the schedule
+                highlightConflicts();
 
-    // Show conflict panel if conflicts found
-    if (detectedConflicts.length > 0) {
-        showConflictPanel();
-    }
+                // Show conflict panel if conflicts found
+                if (detectedConflicts.length > 0) {
+                    showConflictPanel();
+                }
 
-    console.log(`Conflict detection complete. Found ${detectedConflicts.length} conflicts.`);
+                console.log(`✅ Conflict detection complete. Found ${detectedConflicts.length} conflicts.`);
+            }
+        };
+
+        processNextType();
+    }, 10); // Small delay to allow UI to update with loading state
 }
 
 // Detect and handle duplicate sessions
@@ -1101,6 +1228,158 @@ function detectRoomConflicts() {
                 }
             });
         }
+    });
+}
+
+// ✅ NEW: Detect time slot exclusivity conflicts (User Requested Rules)
+function detectTimeSlotExclusivityConflicts() {
+    const timeSlotMap = {};
+    
+    // Build a map of all sessions by day and time slot
+    allData.forEach((session, index) => {
+        const day = session.day;
+        const timeKey = session.schedule_type === 'lab' ? session.time_range : session.time_slot;
+        
+        if (!timeSlotMap[day]) {
+            timeSlotMap[day] = {};
+        }
+        if (!timeSlotMap[day][timeKey]) {
+            timeSlotMap[day][timeKey] = [];
+        }
+        
+        timeSlotMap[day][timeKey].push({ ...session, originalIndex: index });
+    });
+    
+    // Check each time slot for exclusivity violations
+    Object.entries(timeSlotMap).forEach(([day, daySlots]) => {
+        Object.entries(daySlots).forEach(([timeSlot, sessions]) => {
+            if (sessions.length <= 1) return; // No conflicts possible with 1 or fewer sessions
+            
+            const theorySessions = sessions.filter(s => s.schedule_type === 'theory');
+            const labSessions = sessions.filter(s => s.schedule_type === 'lab');
+            
+            // Rule 1: Theory-Lab Department Exclusivity
+            if (theorySessions.length > 0 && labSessions.length > 0) {
+                // Group sessions by department to check conflicts within same department only
+                const deptGroups = {};
+                
+                // Group theory sessions by department
+                theorySessions.forEach(s => {
+                    const dept = s.department || s.student_dept;
+                    if (!deptGroups[dept]) deptGroups[dept] = { theory: [], lab: [] };
+                    deptGroups[dept].theory.push(s);
+                });
+                
+                // Group lab sessions by department
+                labSessions.forEach(s => {
+                    const dept = s.department || s.student_dept;
+                    if (!deptGroups[dept]) deptGroups[dept] = { theory: [], lab: [] };
+                    deptGroups[dept].lab.push(s);
+                });
+                
+                // Check for conflicts within each department
+                Object.entries(deptGroups).forEach(([dept, sessions]) => {
+                    if (sessions.theory.length > 0 && sessions.lab.length > 0) {
+                        const allSessions = [...sessions.theory, ...sessions.lab];
+                        detectedConflicts.push({
+                            type: 'theory_lab_dept_conflict',
+                            severity: 'critical',
+                            message: `CRITICAL: ${dept} has both theory and lab sessions at same time on ${day} ${timeSlot}`,
+                            sessions: allSessions,
+                            details: {
+                                rule: 'Theory-Lab Department Exclusivity',
+                                day: day,
+                                timeSlot: timeSlot,
+                                department: dept,
+                                theorySessions: sessions.theory.length,
+                                labSessions: sessions.lab.length,
+                                totalConflicts: allSessions.length,
+                                reason: 'Theory and lab sessions cannot overlap in same department'
+                            }
+                        });
+                    }
+                });
+            }
+            
+            // Rule 2: Theory Single Group Rule (Same Department)
+            if (theorySessions.length > 1) {
+                // Group theory sessions by department and check conflicts within each department
+                const deptTheoryGroups = {};
+                
+                theorySessions.forEach(s => {
+                    const dept = s.department || s.student_dept;
+                    if (!deptTheoryGroups[dept]) deptTheoryGroups[dept] = [];
+                    deptTheoryGroups[dept].push(s);
+                });
+                
+                Object.entries(deptTheoryGroups).forEach(([dept, deptSessions]) => {
+                    const groups = [...new Set(deptSessions.map(s => s.group_name))];
+                    if (groups.length > 1) {
+                        // Multiple groups in same department have theory at same time - CRITICAL VIOLATION
+                        detectedConflicts.push({
+                            type: 'theory_single_group_dept_conflict',
+                            severity: 'critical',
+                            message: `CRITICAL: ${dept} has multiple groups with theory sessions at ${day} ${timeSlot}: ${groups.join(', ')}`,
+                            sessions: deptSessions,
+                            details: {
+                                rule: 'Theory Single Group Rule (Same Department)',
+                                day: day,
+                                timeSlot: timeSlot,
+                                department: dept,
+                                groups: groups,
+                                sessionCount: deptSessions.length,
+                                reason: 'Only one group per department can have theory session at any time slot'
+                            }
+                        });
+                    }
+                });
+            }
+            
+            // Rule 3: Lab sessions conflicting with theory (check overlap within same semester and department)
+            labSessions.forEach(labSession => {
+                const labTimeSlots = window.allocationManager?.labSessionDetails?.[labSession.session_name] || [labSession.time_range];
+                
+                // Extract lab session's semester and department
+                const labSemester = labSession.semester || getSemesterFromGroupName(labSession.group_name);
+                const labDept = labSession.department || labSession.student_dept;
+                
+                labTimeSlots.forEach(labTimeSlot => {
+                    const conflictingTheory = allData.filter(s => {
+                        if (s === labSession || s.schedule_type !== 'theory' || s.day !== day || s.time_slot !== labTimeSlot) {
+                            return false;
+                        }
+                        
+                        // Extract theory session's semester and department
+                        const theorySemester = s.semester || getSemesterFromGroupName(s.group_name);
+                        const theoryDept = s.department || s.student_dept;
+                        
+                        // Only check conflicts within same semester and department
+                        return labSemester === theorySemester && labDept === theoryDept;
+                    });
+                    
+                    if (conflictingTheory.length > 0) {
+                        conflictingTheory.forEach(theorySession => {
+                            detectedConflicts.push({
+                                type: 'theory_lab_overlap_conflict',
+                                severity: 'critical',
+                                message: `CRITICAL: Lab session ${labSession.course_code} (${labSession.group_name}) conflicts with theory session ${theorySession.course_code} (${theorySession.group_name}) at ${labTimeSlot} - Same Dept/Sem`,
+                                sessions: [labSession, theorySession],
+                                details: {
+                                    rule: 'Lab-Theory Overlap Prevention (Same Dept/Sem)',
+                                    day: day,
+                                    timeSlot: labTimeSlot,
+                                    labSession: `${labSession.course_code} - ${labSession.group_name} (${labSession.session_name})`,
+                                    theorySession: `${theorySession.course_code} - ${theorySession.group_name}`,
+                                    semester: labSemester,
+                                    department: labDept,
+                                    reason: 'Lab and theory sessions cannot overlap in same semester and department'
+                                }
+                            });
+                        });
+                    }
+                });
+            });
+        });
     });
 }
 
@@ -2269,7 +2548,172 @@ async function validateDrop(sessionIndex, newDay, newTimeSlot) {
         });
     }
     
-    // 3. ❌ STRICT GROUP RULE: No group overlaps allowed in drag & drop
+    // 3. ❌ STRICT TIME SLOT EXCLUSIVITY RULES (User Requested)
+    
+    // 3a. Theory-Lab Department Exclusivity: If same department has theory at this time, NO lab sessions allowed
+    if (session.schedule_type === 'lab') {
+        // Extract current lab session's department
+        const labDept = session.department || session.student_dept;
+        
+        // Check if SAME DEPARTMENT has a theory session at this time
+        const theoryConflicts = allData.filter(s => {
+            if (s === session || s.schedule_type !== 'theory' || s.day !== newDay || s.time_slot !== newTimeSlot) {
+                return false;
+            }
+            
+            // Extract theory session's department
+            const theoryDept = s.department || s.student_dept;
+            
+            // Only check conflicts within same department
+            return labDept === theoryDept;
+        });
+        
+        if (theoryConflicts.length > 0) {
+            theoryConflicts.forEach(theorySession => {
+                conflicts.push({
+                    type: 'theory_lab_dept_conflict',
+                    severity: 'critical',
+                    message: `Cannot schedule lab session: Theory session ${theorySession.course_code} (${theorySession.group_name}) already scheduled at ${newTimeSlot} - Same Dept`,
+                    details: {
+                        rule: 'Theory-Lab Department Exclusivity',
+                        conflictingSession: `${theorySession.course_code} - ${theorySession.group_name}`,
+                        timeSlot: newTimeSlot,
+                        day: newDay,
+                        department: labDept,
+                        reason: 'Lab and theory sessions cannot overlap in same department'
+                    }
+                });
+            });
+        }
+    }
+    
+    // 3a-extra. Lab-Theory Overlap Prevention: Lab sessions cannot conflict with theory sessions IN SAME SEMESTER AND DEPARTMENT
+    if (session.schedule_type === 'lab') {
+        // Extract current lab session's semester and department
+        const labSemester = session.semester || getSemesterFromGroupName(session.group_name);
+        const labDeptOverlap = session.department || session.student_dept;
+        
+        // Check if theory sessions in same sem/dept conflict with each time slot of this lab session
+        for (const timeSlot of sessionTimeSlots) {
+            const theoryConflicts = allData.filter(s => {
+                if (s === session || s.schedule_type !== 'theory' || s.day !== newDay || s.time_slot !== timeSlot) {
+                    return false;
+                }
+                
+                // Extract theory session's semester and department
+                const theorySemester = s.semester || getSemesterFromGroupName(s.group_name);
+                const theoryDept = s.department || s.student_dept;
+                
+                // Only check conflicts within same semester and department
+                return labSemester === theorySemester && labDeptOverlap === theoryDept;
+            });
+            
+            if (theoryConflicts.length > 0) {
+                theoryConflicts.forEach(theorySession => {
+                    conflicts.push({
+                        type: 'lab_theory_overlap_conflict',
+                        severity: 'critical',
+                        message: `Lab session conflicts with theory session ${theorySession.course_code} (${theorySession.group_name}) at ${timeSlot} - Same Dept/Sem`,
+                        details: {
+                            rule: 'Lab-Theory Overlap Prevention (Same Dept/Sem)',
+                            conflictingSession: `${theorySession.course_code} - ${theorySession.group_name}`,
+                            timeSlot: timeSlot,
+                            day: newDay,
+                            semester: labSemester,
+                            department: labDeptOverlap,
+                            reason: 'Lab session conflicts with theory session in same semester and department'
+                        }
+                    });
+                });
+            }
+        }
+    }
+    
+    // 3b. Theory Single Group Rule (Same Department): Only ONE group per department can have theory at any time slot
+    if (session.schedule_type === 'theory') {
+        // Extract current theory session's department
+        const theoryDept = session.department || session.student_dept;
+        
+        // Check if other groups in SAME DEPARTMENT have a theory session at this time
+        const otherTheoryConflicts = allData.filter(s => {
+            if (s === session || s.schedule_type !== 'theory' || s.day !== newDay || s.time_slot !== newTimeSlot) {
+                return false;
+            }
+            
+            // Different group check
+            if (s.group_name === session.group_name) {
+                return false;
+            }
+            
+            // Extract theory session's department
+            const conflictTheoryDept = s.department || s.student_dept;
+            
+            // Only check conflicts within same department
+            return theoryDept === conflictTheoryDept;
+        });
+        
+        if (otherTheoryConflicts.length > 0) {
+            otherTheoryConflicts.forEach(theorySession => {
+                conflicts.push({
+                    type: 'theory_single_group_dept_conflict',
+                    severity: 'critical',
+                    message: `Cannot schedule theory session: Group ${theorySession.group_name} already has theory session ${theorySession.course_code} at ${newTimeSlot} - Same Dept`,
+                    details: {
+                        rule: 'Theory Single Group Rule (Same Department)',
+                        conflictingSession: `${theorySession.course_code} - ${theorySession.group_name}`,
+                        requestedGroup: session.group_name,
+                        timeSlot: newTimeSlot,
+                        day: newDay,
+                        department: theoryDept,
+                        reason: 'Only one group per department can have theory session at any time slot'
+                    }
+                });
+            });
+        }
+        
+        // Also check if lab sessions in SAME SEMESTER AND DEPARTMENT overlap with this theory time slot
+        const theorySemester = session.semester || getSemesterFromGroupName(session.group_name);
+        const theoryDeptOverlap = session.department || session.student_dept;
+        
+        const labConflicts = allData.filter(s => {
+            if (s === session || s.schedule_type !== 'lab' || s.day !== newDay) {
+                return false;
+            }
+            
+            // Check if lab session overlaps with this theory time slot
+            if (!window.allocationManager.labSessionDetails?.[s.session_name]?.includes(newTimeSlot)) {
+                return false;
+            }
+            
+            // Extract lab session's semester and department
+            const labSemester = s.semester || getSemesterFromGroupName(s.group_name);
+            const labDept = s.department || s.student_dept;
+            
+            // Only check conflicts within same semester and department
+            return theorySemester === labSemester && theoryDeptOverlap === labDept;
+        });
+        
+        if (labConflicts.length > 0) {
+            labConflicts.forEach(labSession => {
+                conflicts.push({
+                    type: 'theory_lab_overlap_conflict',
+                    severity: 'critical',
+                    message: `Cannot schedule theory session: Lab session ${labSession.course_code} (${labSession.group_name}) overlaps at ${newTimeSlot} - Same Dept/Sem`,
+                    details: {
+                        rule: 'Lab-Theory Overlap Prevention (Same Dept/Sem)',
+                        conflictingSession: `${labSession.course_code} - ${labSession.group_name} (${labSession.session_name})`,
+                        timeSlot: newTimeSlot,
+                        day: newDay,
+                        semester: theorySemester,
+                        department: theoryDeptOverlap,
+                        reason: 'Theory session conflicts with lab session in same semester and department'
+                    }
+                });
+            });
+        }
+    }
+    
+    // 3c. ❌ STRICT GROUP RULE: No group overlaps allowed in drag & drop (same group)
     const groupConflicts = allData.filter(s => 
         s !== session &&
         s.group_name === session.group_name &&

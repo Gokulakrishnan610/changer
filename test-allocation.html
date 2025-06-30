@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Allocation Manager</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .console-output {
+            background-color: #000;
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            padding: 1rem;
+            border-radius: 5px;
+            height: 400px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-4">
+        <h2>🧪 Allocation Manager Test</h2>
+        <p>This is a minimal test to verify the allocation manager loads correctly.</p>
+        
+        <div class="row">
+            <div class="col-md-6">
+                <h4>Test Status</h4>
+                <div id="testStatus" class="alert alert-info">
+                    <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                    Running tests...
+                </div>
+                
+                <div class="mt-3">
+                    <button id="retryBtn" class="btn btn-primary" onclick="runTest()" disabled>
+                        Retry Test
+                    </button>
+                    <a href="allocation_manager.html" class="btn btn-success ms-2">
+                        Go to Allocation Manager
+                    </a>
+                </div>
+            </div>
+            
+            <div class="col-md-6">
+                <h4>Console Output</h4>
+                <div id="console" class="console-output"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="user-state-manager.js"></script>
+    <script src="performance-optimizer.js"></script>
+    <script src="allocation_manager.js"></script>
+    
+    <script>
+        let testOutput = [];
+        
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logMessage = `[${timestamp}] ${type.toUpperCase()}: ${message}`;
+            testOutput.push(logMessage);
+            
+            const consoleElement = document.getElementById('console');
+            consoleElement.textContent = testOutput.join('\n');
+            consoleElement.scrollTop = consoleElement.scrollHeight;
+            
+            console.log(logMessage);
+        }
+        
+        function updateStatus(message, type = 'info') {
+            const statusElement = document.getElementById('testStatus');
+            const alertClass = {
+                'info': 'alert-info',
+                'success': 'alert-success',
+                'warning': 'alert-warning',
+                'error': 'alert-danger'
+            }[type] || 'alert-info';
+            
+            statusElement.className = `alert ${alertClass}`;
+            statusElement.innerHTML = message;
+        }
+        
+        async function runTest() {
+            log('🧪 Starting allocation manager test...');
+            updateStatus('<div class="spinner-border spinner-border-sm me-2" role="status"></div>Running tests...');
+            
+            try {
+                // Test 1: Check dependencies
+                log('📦 Checking dependencies...');
+                const hasUserState = typeof userState !== 'undefined';
+                const hasPerformanceOptimizer = typeof performanceOptimizer !== 'undefined';
+                const hasAllocationManager = typeof AllocationManager !== 'undefined';
+                
+                log(`UserState: ${hasUserState ? '✅' : '❌'}`);
+                log(`PerformanceOptimizer: ${hasPerformanceOptimizer ? '✅' : '❌'}`);
+                log(`AllocationManager: ${hasAllocationManager ? '✅' : '❌'}`);
+                
+                if (!hasAllocationManager) {
+                    throw new Error('AllocationManager class not found');
+                }
+                
+                // Test 2: Create instance
+                log('🏗️ Creating AllocationManager instance...');
+                const manager = new AllocationManager();
+                log('✅ Instance created successfully');
+                
+                // Test 3: Test data loading
+                log('📊 Testing data loading...');
+                const result = await manager.loadScheduleData();
+                
+                if (result.success) {
+                    log('✅ Data loaded successfully');
+                    log(`📈 Statistics: ${manager.allData.length} total sessions`);
+                    log(`🧪 Lab sessions: ${manager.labData.length}`);
+                    log(`📚 Theory sessions: ${manager.theoryData.length}`);
+                    
+                    updateStatus(`
+                        <i class="fas fa-check-circle text-success me-2"></i>
+                        <strong>✅ Test Passed!</strong><br>
+                        <small>Allocation manager loaded ${manager.allData.length} sessions successfully</small>
+                    `, 'success');
+                } else {
+                    throw new Error(result.message || 'Data loading failed');
+                }
+                
+            } catch (error) {
+                log(`❌ Test failed: ${error.message}`, 'error');
+                
+                // Provide specific troubleshooting based on error
+                let troubleshooting = '';
+                if (error.message.includes('fetch') || error.message.includes('files not found')) {
+                    troubleshooting = `
+                        <div class="mt-2">
+                            <strong>💡 Troubleshooting:</strong><br>
+                            <small>
+                                • Check if data files exist in ./output/ directory<br>
+                                • Ensure web server is running<br>
+                                • Try the <a href="diagnostics.html">diagnostics page</a>
+                            </small>
+                        </div>
+                    `;
+                } else if (error.message.includes('JSON')) {
+                    troubleshooting = `
+                        <div class="mt-2">
+                            <strong>💡 Troubleshooting:</strong><br>
+                            <small>
+                                • Data files may be corrupted<br>
+                                • Try regenerating schedule files<br>
+                                • Check <a href="diagnostics.html">diagnostics page</a>
+                            </small>
+                        </div>
+                    `;
+                }
+                
+                updateStatus(`
+                    <i class="fas fa-exclamation-triangle text-danger me-2"></i>
+                    <strong>❌ Test Failed</strong><br>
+                    <small>${error.message}</small>
+                    ${troubleshooting}
+                `, 'error');
+            } finally {
+                document.getElementById('retryBtn').disabled = false;
+                log('🧪 Test completed');
+            }
+        }
+        
+        // Run test when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            log('🌟 Test page loaded');
+            setTimeout(runTest, 500); // Small delay to ensure all scripts are loaded
+        });
+    </script>
+</body>
+</html> 

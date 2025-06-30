@@ -45,65 +45,100 @@ function getGroupNumber(groupName) {
     return match ? match[1] : '';
 }
 
+// Initialize user state for rooms page
+if (typeof userState !== 'undefined') {
+    userState.setCurrentPage('rooms');
+}
+
 // Load and parse data
 async function loadData() { 
     try {
-        // Load lab data
-        // Get the latest folder path from the server
-        // const folderResponse = await fetch('/api/latest-folder');
-        // const folderData = await folderResponse.json();
+        console.log('🏫 Loading room data with user state management...');
         
-        // if (folderData.error) {
-        //     throw new Error(folderData.error);
-        // }
+        // Update user state
+        if (typeof userState !== 'undefined') {
+            userState.updateDataState({ isLoading: true, loadingProgress: 0, error: null });
+        }
         
-        // const latestFolder = folderData.latestFolder;
-        // console.log('Room timetable using latest schedule folder:', latestFolder);
+        // Check if data is already cached and fresh
+        const dataState = userState?.getDataState();
+        const cacheTimeout = 5 * 60 * 1000; // 5 minutes
+        const isCacheFresh = dataState?.lastLoaded && 
+                           (Date.now() - dataState.lastLoaded) < cacheTimeout;
         
-        // const labResponse = await fetch(`${latestFolder}/combined_lab_schedule.json`);
-        // labData = await labResponse.json();
+        if (isCacheFresh && allData.length > 0) {
+            console.log('✅ Using cached room data');
+            userState?.updateDataState({ isLoading: false, loadingProgress: 100 });
+            
+            // Still need to process room data and initialize UI
+            processRoomData();
+            initializeFilters();
+            updateStats();
+            renderRooms();
+            restoreRoomFilters();
+            return;
+        }
         
-        // // Load theory data
-        // const theoryResponse = await fetch(`${latestFolder}/combined_theory_schedule.json`);
-        // theoryData = await theoryResponse.json();
-        
-        // // Combine data
-        // allData = [...labData, ...theoryData];
-        
-            const [labPath, theoryPath, shiftPath] = [
-                './output/combined_lab_schedule.json',
-                './output/combined_theory_schedule.json',
-                './output/verification_report.json'
-            ];
+        const [labPath, theoryPath, shiftPath] = [
+            './output/combined_lab_schedule.json',
+            './output/combined_theory_schedule.json',
+            './output/verification_report.json'
+        ];
 
-            try {
-                const [labRes, theoryRes, shiftRes] = await Promise.all([
-                    fetch(labPath),
-                    fetch(theoryPath),
-                    fetch(shiftPath).catch(() => null) // Handle potential missing file
-                ]);
+        userState?.updateDataState({ loadingProgress: 20 });
 
-                labData = await labRes.json();
-                theoryData = await theoryRes.json();
-                allData = [...labData, ...theoryData];
-                
-                if (shiftRes && shiftRes.ok) {
-                    teacherShiftData = await shiftRes.json();
-                }
-            } catch (error) {
-                console.error('Error loading JSON files:', error);
+        try {
+            const [labRes, theoryRes, shiftRes] = await Promise.all([
+                fetch(labPath),
+                fetch(theoryPath),
+                fetch(shiftPath).catch(() => null) // Handle potential missing file
+            ]);
+
+            userState?.updateDataState({ loadingProgress: 50 });
+
+            labData = await labRes.json();
+            theoryData = await theoryRes.json();
+            allData = [...labData, ...theoryData];
+            
+            userState?.updateDataState({ loadingProgress: 70 });
+            
+            if (shiftRes && shiftRes.ok) {
+                teacherShiftData = await shiftRes.json();
             }
+        } catch (error) {
+            console.error('Error loading JSON files:', error);
+            throw error;
+        }
+        
+        userState?.updateDataState({ loadingProgress: 80 });
         
         // Process room data
         processRoomData();
+        
+        userState?.updateDataState({ loadingProgress: 90 });
         
         // Initialize UI
         initializeFilters();
         updateStats();
         renderRooms();
         
+        // Restore user filters
+        restoreRoomFilters();
+        
+        userState?.updateDataState({ 
+            isLoading: false, 
+            loadingProgress: 100,
+            lastLoaded: Date.now()
+        });
+        
+        console.log('✅ Room data loaded successfully');
+        
     } catch (error) {
-        console.error('Error loading data:', error);
+        console.error('❌ Error loading room data:', error);
+        userState?.updateDataState({ 
+            isLoading: false, 
+            error: error.message 
+        });
         document.getElementById('roomContainer').innerHTML = `
             <div class="alert alert-danger text-center">
                 <i class="fas fa-exclamation-triangle me-2"></i>
@@ -112,6 +147,46 @@ async function loadData() {
             </div>
         `;
     }
+}
+
+// Restore room filters from user state
+function restoreRoomFilters() {
+    if (typeof userState === 'undefined') return;
+    
+    const filters = userState.getFilters('rooms');
+    
+    if (filters.selectedBlock && filters.selectedBlock !== 'all') {
+        filterByBlock(filters.selectedBlock);
+        
+        // Update UI to reflect the filter
+        const blockButtons = document.querySelectorAll('.block-filter-btn');
+        blockButtons.forEach(btn => {
+            btn.classList.remove('active');
+            if (btn.textContent.includes(filters.selectedBlock)) {
+                btn.classList.add('active');
+            }
+        });
+    }
+    
+    console.log('✅ Room filters restored');
+}
+
+// Save room filter state
+function saveRoomFilterState(filterType, value) {
+    if (typeof userState === 'undefined') return;
+    
+    const currentFilters = userState.getFilters('rooms');
+    const updatedFilters = { ...currentFilters };
+    
+    if (filterType === 'block') {
+        updatedFilters.selectedBlock = value;
+    } else if (filterType === 'roomType') {
+        updatedFilters.selectedRoomType = value;
+    } else if (filterType === 'sortBy') {
+        updatedFilters.sortBy = value;
+    }
+    
+    userState.updateFilters('rooms', updatedFilters);
 }
 
 // Process data by room
@@ -247,6 +322,9 @@ function filterByBlock(block) {
         btn.classList.remove('active');
     });
     event.target.classList.add('active');
+    
+    // Save filter state
+    saveRoomFilterState('block', block);
     
     renderRooms();
 }
