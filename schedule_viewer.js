@@ -86,6 +86,404 @@ function getRoomType(roomNumber) {
     return 'theory';
 }
 
+// ==== JSON FILE PERSISTENCE FUNCTIONS ====
+
+// Save changes directly to the original JSON files
+async function saveChangesToJsonFiles() {
+    try {
+        console.log('💾 Saving changes to original JSON files...');
+        
+        // Save updated data directly to original files (server creates backups automatically)
+        await saveUpdatedJsonFiles();
+        
+        console.log('✅ Changes saved to original JSON files successfully');
+        showSuccessAlert('Changes saved to original JSON files successfully!');
+        
+    } catch (error) {
+        console.error('❌ Error saving changes to JSON files:', error);
+        showErrorAlert('Failed to save changes to JSON files: ' + error.message);
+    }
+}
+
+// Create backup copies of the original JSON files
+async function createBackupFiles() {
+    try {
+        // Since we can't directly write files from browser, we'll use a different approach
+        // We'll create downloadable backup files when changes are made
+        
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+        
+        // Create backup data objects
+        const backupData = {
+            lab: [...labData],
+            theory: [...theoryData],
+            timestamp: timestamp,
+            originalFiles: {
+                lab: './output/combined_lab_schedule.json',
+                theory: './output/combined_theory_schedule.json'
+            }
+        };
+        
+        // Store backup in localStorage for now
+        localStorage.setItem('schedule_backup_' + timestamp, JSON.stringify(backupData));
+        
+        // Also create downloadable backup files
+        downloadBackupFiles(backupData);
+        
+        console.log(`✅ Backup created with timestamp: ${timestamp}`);
+        
+    } catch (error) {
+        console.error('❌ Error creating backup files:', error);
+        throw new Error('Failed to create backup files');
+    }
+}
+
+// Download backup files
+function downloadBackupFiles(backupData) {
+    try {
+        // Download lab backup
+        downloadJsonFile(backupData.lab, `combined_lab_schedule_backup_${backupData.timestamp}.json`);
+        
+        // Download theory backup
+        downloadJsonFile(backupData.theory, `combined_theory_schedule_backup_${backupData.timestamp}.json`);
+        
+        console.log('✅ Backup files prepared for download');
+        
+    } catch (error) {
+        console.error('❌ Error preparing backup downloads:', error);
+    }
+}
+
+// Save updated JSON files directly to the original files
+async function saveUpdatedJsonFiles() {
+    try {
+        console.log('📤 Saving lab and theory schedules to original files...');
+        
+        // Save both lab and theory schedules to original files
+        const savePromises = [
+            saveJsonToServer(labData, './output/combined_lab_schedule.json'),
+            saveJsonToServer(theoryData, './output/combined_theory_schedule.json')
+        ];
+        
+        const results = await Promise.all(savePromises);
+        
+        console.log('✅ All files saved to original location successfully');
+        console.log(`   - Lab sessions: ${labData.length} saved`);
+        console.log(`   - Theory sessions: ${theoryData.length} saved`);
+        
+        return results;
+        
+    } catch (error) {
+        console.error('❌ Error saving updated JSON files:', error);
+        throw new Error(`Failed to save files to original location: ${error.message}`);
+    }
+}
+
+// Save JSON data directly to server via API
+async function saveJsonToServer(data, filepath) {
+    console.log(`📡 Sending ${data.length} sessions to ${filepath}...`);
+    
+    const response = await fetch('/api/save-schedule', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            data: data,
+            filepath: filepath
+        })
+    });
+    
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Server error (${response.status}): ${errorText}`);
+    }
+    
+    const result = await response.json();
+    console.log(`✅ ${filepath}: ${result.message}`);
+    
+    return result;
+}
+
+// Download JSON file to user's computer
+function downloadJsonFile(data, filename) {
+    const jsonString = JSON.stringify(data, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    URL.revokeObjectURL(url);
+}
+
+// Show instructions for manual file replacement
+function showSaveInstructions() {
+    const instructionsModal = document.createElement('div');
+    instructionsModal.className = 'modal fade';
+    instructionsModal.id = 'saveInstructionsModal';
+    instructionsModal.innerHTML = `
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-warning text-dark">
+                    <h5 class="modal-title">
+                        <i class="fas fa-download me-2"></i>
+                        Manual File Update Required
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>Your changes have been downloaded as JSON files.</strong> 
+                        Please replace the original files to persist your changes.
+                    </div>
+                    
+                    <h6>📋 Instructions:</h6>
+                    <ol class="list-group list-group-numbered">
+                        <li class="list-group-item">
+                            <strong>Locate the downloaded files:</strong>
+                            <ul class="mt-2">
+                                <li><code>combined_lab_schedule.json</code></li>
+                                <li><code>combined_theory_schedule.json</code></li>
+                                <li><code>combined_lab_schedule_backup_[timestamp].json</code> (backup)</li>
+                                <li><code>combined_theory_schedule_backup_[timestamp].json</code> (backup)</li>
+                            </ul>
+                        </li>
+                        <li class="list-group-item">
+                            <strong>Replace the original files:</strong>
+                            <br>Copy the downloaded files to: <code>./output/</code> directory
+                        </li>
+                        <li class="list-group-item">
+                            <strong>Keep backups safe:</strong>
+                            <br>Store the backup files in a secure location
+                        </li>
+                    </ol>
+                    
+                    <div class="alert alert-success mt-3">
+                        <i class="fas fa-shield-alt me-2"></i>
+                        <strong>Backup files created automatically</strong> - Your original data is safe!
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" onclick="downloadAllFiles()">
+                        <i class="fas fa-download me-1"></i>
+                        Download All Files Again
+                    </button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        Got It
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(instructionsModal);
+    
+    const modal = new bootstrap.Modal(instructionsModal);
+    modal.show();
+    
+    // Cleanup when modal is hidden
+    instructionsModal.addEventListener('hidden.bs.modal', () => {
+        instructionsModal.remove();
+    });
+}
+
+// Download all files again
+function downloadAllFiles() {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+    
+    // Download updated files
+    downloadJsonFile(labData, 'combined_lab_schedule.json');
+    downloadJsonFile(theoryData, 'combined_theory_schedule.json');
+    
+    // Download backup files
+    downloadJsonFile(labData, `combined_lab_schedule_backup_${timestamp}.json`);
+    downloadJsonFile(theoryData, `combined_theory_schedule_backup_${timestamp}.json`);
+    
+    showSuccessAlert('All files downloaded successfully!');
+}
+
+// ==== BACKUP MANAGEMENT FUNCTIONS ====
+
+// List all available backups
+function listAvailableBackups() {
+    const backups = [];
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('schedule_backup_')) {
+            try {
+                const backup = JSON.parse(localStorage.getItem(key));
+                backups.push({
+                    key: key,
+                    timestamp: backup.timestamp,
+                    labSessions: backup.lab.length,
+                    theorySessions: backup.theory.length
+                });
+            } catch (e) {
+                console.warn('Invalid backup found:', key);
+            }
+        }
+    }
+    return backups.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+
+// Restore from backup
+function restoreFromBackup(backupKey) {
+    try {
+        const backupData = JSON.parse(localStorage.getItem(backupKey));
+        if (!backupData) {
+            throw new Error('Backup not found');
+        }
+        
+        // Restore data
+        labData = [...backupData.lab];
+        theoryData = [...backupData.theory];
+        allData = [...labData, ...theoryData];
+        
+        // Refresh UI
+        renderContent();
+        
+        showSuccessAlert(`Restored from backup: ${backupData.timestamp}`);
+        
+    } catch (error) {
+        console.error('Error restoring backup:', error);
+        showErrorAlert('Failed to restore backup: ' + error.message);
+    }
+}
+
+// ==== UI INTEGRATION FUNCTIONS ====
+
+// Add backup management UI
+function showBackupManager() {
+    const backups = listAvailableBackups();
+    
+    const backupModal = document.createElement('div');
+    backupModal.className = 'modal fade';
+    backupModal.id = 'backupManagerModal';
+    backupModal.innerHTML = `
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title">
+                        <i class="fas fa-history me-2"></i>
+                        Backup Manager
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    ${backups.length === 0 ? `
+                        <div class="alert alert-info text-center">
+                            <i class="fas fa-info-circle me-2"></i>
+                            No backups available. Backups are created automatically when you make changes.
+                        </div>
+                    ` : `
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Timestamp</th>
+                                        <th>Lab Sessions</th>
+                                        <th>Theory Sessions</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${backups.map(backup => `
+                                        <tr>
+                                            <td>
+                                                <small class="text-muted">${backup.timestamp.replace('T', ' ')}</small>
+                                            </td>
+                                            <td>
+                                                <span class="badge bg-info">${backup.labSessions}</span>
+                                            </td>
+                                            <td>
+                                                <span class="badge bg-success">${backup.theorySessions}</span>
+                                            </td>
+                                            <td>
+                                                <button class="btn btn-sm btn-outline-primary me-1" 
+                                                        onclick="restoreFromBackup('${backup.key}')">
+                                                    <i class="fas fa-undo me-1"></i>Restore
+                                                </button>
+                                                <button class="btn btn-sm btn-outline-danger" 
+                                                        onclick="deleteBackup('${backup.key}')">
+                                                    <i class="fas fa-trash me-1"></i>Delete
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    `}
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-warning" onclick="clearAllBackups()">
+                        <i class="fas fa-trash-alt me-1"></i>
+                        Clear All Backups
+                    </button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(backupModal);
+    
+    const modal = new bootstrap.Modal(backupModal);
+    modal.show();
+    
+    // Cleanup when modal is hidden
+    backupModal.addEventListener('hidden.bs.modal', () => {
+        backupModal.remove();
+    });
+}
+
+// Delete a specific backup
+function deleteBackup(backupKey) {
+    if (confirm('Are you sure you want to delete this backup?')) {
+        localStorage.removeItem(backupKey);
+        showSuccessAlert('Backup deleted successfully');
+        
+        // Refresh backup manager if open
+        const modal = document.getElementById('backupManagerModal');
+        if (modal) {
+            bootstrap.Modal.getInstance(modal).hide();
+            setTimeout(() => showBackupManager(), 300);
+        }
+    }
+}
+
+// Clear all backups
+function clearAllBackups() {
+    if (confirm('Are you sure you want to delete ALL backups? This action cannot be undone.')) {
+        const keys = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('schedule_backup_')) {
+                keys.push(key);
+            }
+        }
+        
+        keys.forEach(key => localStorage.removeItem(key));
+        
+        showSuccessAlert(`${keys.length} backups cleared successfully`);
+        
+        // Refresh backup manager
+        const modal = document.getElementById('backupManagerModal');
+        if (modal) {
+            bootstrap.Modal.getInstance(modal).hide();
+            setTimeout(() => showBackupManager(), 300);
+        }
+    }
+}
+
 function initializeUI() {
     const filters = {
         department: [...new Set(allData.map(i => i.department).filter(Boolean))].sort(),
@@ -719,113 +1117,31 @@ function detectGroupConflicts() {
         groupSchedule[key].push({ ...session, originalIndex: index });
     });
 
-    // Find conflicts
+    // ❌ STRICT GROUP RULE: No group overlaps allowed
+    // - Lab and theory sessions for same group cannot overlap
+    // - Any overlap is treated as a high-severity conflict
     Object.entries(groupSchedule).forEach(([key, sessions]) => {
         if (sessions.length > 1) {
-            // Check if it's not the same course (batched sessions are allowed)
-            const uniqueCourses = new Set(sessions.map(s => s.course_instance_id));
-            const uniqueCourseCodes = new Set(sessions.map(s => s.course_code));
+            const [groupName, day, timeSlot] = key.split('_');
+            const courseCodes = sessions.map(s => s.course_code);
+            const sessionTypes = sessions.map(s => s.schedule_type);
             
-            if (uniqueCourses.size > 1) {
-                // Check for allowed co-scheduling cases based on combined_scheduler.py rules
-                
-                // 1. Same course code - co-scheduling allowed (lines 4277-4281 in combined_scheduler.py)
-                if (uniqueCourseCodes.size === 1) {
-                    // Mark as co-scheduled but not a conflict
-                    sessions.forEach(session => {
-                        session.is_co_scheduled = true;
-                        session.co_schedule_info = `Co-scheduled with ${sessions.length - 1} other instance(s)`;
-                    });
-                    return; // No conflict - same course co-scheduling is allowed
+            // ❌ GROUP CONFLICT: Multiple sessions for same group at same time
+            detectedConflicts.push({
+                type: 'group_conflict',
+                severity: 'high',
+                message: `Group ${groupName.replace(/_/g, ' ')} has ${sessions.length} overlapping sessions at ${day} ${timeSlot}: ${courseCodes.join(', ')} (${sessionTypes.join(', ')})`,
+                sessions: sessions,
+                details: {
+                    group: groupName,
+                    day: day,
+                    timeSlot: timeSlot,
+                    sessionCount: sessions.length,
+                    courseCodes: courseCodes,
+                    sessionTypes: sessionTypes,
+                    rule: 'No group overlaps allowed'
                 }
-                
-                // 2. Check for virtual instances (course codes ending with -A, -B, etc.)
-                const courseCodes = Array.from(uniqueCourseCodes);
-                const baseCourses = courseCodes.map(code => code.replace(/-[A-Z]$/i, ''));
-                const uniqueBaseCourses = new Set(baseCourses);
-                
-                if (uniqueBaseCourses.size === 1) {
-                    // Virtual instances of the same course - allowed per virtual instance logic
-                    sessions.forEach(session => {
-                        session.is_virtual_co_scheduled = true;
-                        session.co_schedule_info = `Virtual instance co-scheduling (${courseCodes.join(', ')})`;
-                    });
-                    return; // No conflict - virtual instances are allowed
-                }
-                
-                // 3. Check for large capacity labs that might allow co-scheduling
-                const roomCapacities = sessions.map(s => parseInt(s.capacity) || 0);
-                const maxCapacity = Math.max(...roomCapacities);
-                const isLargeLab = maxCapacity >= 140;
-                const allLabSessions = sessions.every(s => s.schedule_type === 'lab');
-                
-                if (isLargeLab && allLabSessions) {
-                    // Large lab capacity - mark as allowed co-scheduling
-                    sessions.forEach(session => {
-                        session.is_large_lab_co_scheduled = true;
-                        session.co_schedule_info = `Large lab co-scheduling (${maxCapacity}+ capacity - ${sessions.length} courses)`;
-                    });
-                    console.log(`✅ Large lab co-scheduling allowed: Group ${sessions[0].group_name} - ${Array.from(uniqueCourseCodes).join(', ')} in ${maxCapacity} capacity lab`);
-                } else {
-                    // 4. Check for closely related course codes (e.g., CS23331 vs CS23333)
-                    const coursePattern = /^([A-Z]+)(\d{3})(\d{2})$/;
-                    const courseMatches = Array.from(uniqueCourseCodes).map(code => {
-                        const match = code.match(coursePattern);
-                        return match ? { code, prefix: match[1], series: match[2], number: match[3] } : null;
-                    }).filter(m => m !== null);
-                    
-                    if (courseMatches.length === uniqueCourseCodes.size && courseMatches.length > 1) {
-                        // Check if all courses have same prefix and series (e.g., CS233XX)
-                        const prefixes = [...new Set(courseMatches.map(m => m.prefix))];
-                        const series = [...new Set(courseMatches.map(m => m.series))];
-                        
-                        if (prefixes.length === 1 && series.length === 1) {
-                            // Closely related courses - mark as allowed co-scheduling
-                            sessions.forEach(session => {
-                                session.is_related_course_co_scheduled = true;
-                                session.co_schedule_info = `Closely related course co-scheduling (${prefixes[0]}${series[0]}XX series)`;
-                            });
-                            return; // No conflict - closely related courses can co-schedule  
-                        }
-                        
-                        // ✅ RULE 10: Cross-department related courses in same series (e.g., CS23333 vs CB23331)
-                        // Allow CS (Computer Science) and CB (Computer Business) courses in same series
-                        if (series.length === 1) {
-                            const relatedDeptPairs = [
-                                ['CS', 'CB'], // Computer Science & Computer Business
-                                ['CS', 'IT'], // Computer Science & Information Technology
-                                ['AI', 'CS'], // AI & Computer Science
-                                ['MA', 'CS'], // Mathematics & Computer Science
-                                ['MA', 'ME'], // Mathematics & Mechanical Engineering
-                                ['EC', 'EE'], // Electronics & Electrical
-                                ['ME', 'CE']  // Mechanical & Civil (if applicable)
-                            ];
-                            
-                            const sortedPrefixes = [...prefixes].sort();
-                            const isRelatedDepartments = relatedDeptPairs.some(pair => {
-                                const sortedPair = [...pair].sort();
-                                return JSON.stringify(sortedPrefixes) === JSON.stringify(sortedPair);
-                            });
-                            
-                            if (isRelatedDepartments) {
-                                // Cross-department related courses - mark as allowed co-scheduling
-                                sessions.forEach(session => {
-                                    session.is_cross_dept_co_scheduled = true;
-                                    session.co_schedule_info = `Cross-department related course co-scheduling (${sortedPrefixes.join('-')}${series[0]}XX series)`;
-                                });
-                                return; // No conflict - cross-department related courses can co-schedule
-                            }
-                        }
-                    }
-                    
-                    // ✅ ALLOW: Different courses in same group are now allowed
-                    sessions.forEach(session => {
-                        session.is_different_course_allowed = true;
-                        session.co_schedule_info = `Different courses allowed in same group (constraint removed per user request)`;
-                    });
-                    console.log(`✅ Different courses allowed: Group ${sessions[0].group_name} - ${Array.from(uniqueCourseCodes).join(', ')} at ${sessions[0].day} ${sessions[0].schedule_type === 'lab' ? sessions[0].time_range : sessions[0].time_slot}`);
-                }
-            }
+            });
         }
     });
 }
@@ -1197,28 +1513,28 @@ function populateAvailableTeachers() {
     
     if (!day || !timeSlot || !window.allocationManager) return;
     
-    // Get session type from the save button onclick to extract session index
+    // Get session info
     const saveBtn = document.getElementById('quickSaveBtn');
     const sessionIndex = parseInt(saveBtn.getAttribute('onclick').match(/\d+/)[0]);
     const session = allData[sessionIndex];
-    const sessionType = session ? session.schedule_type : 'theory';
     
     const currentTeacherId = teacherSelect.value; // Preserve current selection
-    const availableTeachers = window.allocationManager.getAvailableTeachers(day, timeSlot);
+    const availableTeachers = window.allocationManager.getAvailableTeachers(day, timeSlot, session);
     
     // Clear and repopulate
     teacherSelect.innerHTML = '<option value="">Select Teacher</option>';
     
-    // Always add current teacher first (even if not available - user might want to keep it)
+    // Always add current teacher first
     if (currentTeacherId) {
         const currentTeacher = Array.from(window.allocationManager.teachers)
             .map(teacherStr => JSON.parse(teacherStr))
             .find(teacher => teacher.id == currentTeacherId);
         
         if (currentTeacher) {
+            const isAvailable = availableTeachers.some(t => t.id == currentTeacherId);
             const option = document.createElement('option');
             option.value = currentTeacher.id;
-            option.textContent = `${currentTeacher.name} (${currentTeacher.staff_code}) ${availableTeachers.some(t => t.id == currentTeacherId) ? '✓' : '⚠️ (Busy)'}`;
+            option.textContent = `${currentTeacher.name} (${currentTeacher.staff_code}) ${isAvailable ? '✓' : '⚠️ (Busy)'}`;
             option.selected = true;
             option.style.fontWeight = 'bold';
             teacherSelect.appendChild(option);
@@ -1227,7 +1543,7 @@ function populateAvailableTeachers() {
     
     // Add available teachers
     availableTeachers.forEach(teacher => {
-        if (teacher.id != currentTeacherId) { // Don't duplicate current teacher
+        if (teacher.id != currentTeacherId) {
             const option = document.createElement('option');
             option.value = teacher.id;
             option.textContent = `${teacher.name} (${teacher.staff_code})`;
@@ -1235,13 +1551,16 @@ function populateAvailableTeachers() {
         }
     });
     
-    // Add separator and unavailable teachers in gray
+    // Add separator and unavailable teachers
     const unavailableTeachers = Array.from(window.allocationManager.teachers)
         .map(teacherStr => JSON.parse(teacherStr))
-        .filter(teacher => teacher.id != currentTeacherId && !availableTeachers.some(t => t.id == teacher.id));
+        .filter(teacher => {
+            if (teacher.id == currentTeacherId) return false;
+            if (availableTeachers.some(t => t.id == teacher.id)) return false;
+            return true;
+        });
         
     if (unavailableTeachers.length > 0) {
-        // Add separator
         const separator = document.createElement('option');
         separator.disabled = true;
         separator.textContent = '─── Unavailable Teachers ───';
@@ -1256,6 +1575,19 @@ function populateAvailableTeachers() {
         });
     }
 }
+
+// Helper function to get room capacity with fallback
+function getRoomCapacity(room) {
+    if (room.capacity && room.capacity !== null && room.capacity !== undefined) {
+        return room.capacity;
+    }
+    
+    // Fallback based on room type
+    const roomType = getRoomType(room.number);
+    return roomType === 'lab' ? 35 : 70;
+}
+
+
 
 // Populate rooms for quick edit (initial setup - will be filtered by updateAvailability)
 function populateQuickRooms(currentRoomId, sessionType) {
@@ -1279,7 +1611,7 @@ function populateAvailableRooms() {
     const sessionType = session ? session.schedule_type : 'theory';
     
     const currentRoomId = roomSelect.value; // Preserve current selection
-    const availableRooms = window.allocationManager.getAvailableRooms(day, timeSlot, sessionType);
+    const availableRooms = window.allocationManager.getAvailableRooms(day, timeSlot, sessionType, session);
     
     // Clear and repopulate
     roomSelect.innerHTML = '<option value="">Select Room</option>';
@@ -1291,9 +1623,10 @@ function populateAvailableRooms() {
             .find(room => room.id == currentRoomId);
         
         if (currentRoom) {
+            const isAvailable = availableRooms.some(r => r.id == currentRoomId);
             const option = document.createElement('option');
             option.value = currentRoom.id;
-            option.textContent = `${currentRoom.number} (${currentRoom.block}) - Capacity: ${currentRoom.capacity} ${availableRooms.some(r => r.id == currentRoomId) ? '✓' : '⚠️ (Busy)'}`;
+            option.textContent = `${currentRoom.number} (${currentRoom.block}) - Capacity: ${getRoomCapacity(currentRoom)} ${isAvailable ? '✓' : '⚠️ (Busy)'}`;
             option.selected = true;
             option.style.fontWeight = 'bold';
             roomSelect.appendChild(option);
@@ -1305,7 +1638,7 @@ function populateAvailableRooms() {
         if (room.id != currentRoomId) { // Don't duplicate current room
             const option = document.createElement('option');
             option.value = room.id;
-            option.textContent = `${room.number} (${room.block}) - Capacity: ${room.capacity}`;
+            option.textContent = `${room.number} (${room.block}) - Capacity: ${getRoomCapacity(room)}`;
             roomSelect.appendChild(option);
         }
     });
@@ -1317,10 +1650,10 @@ function populateAvailableRooms() {
             if (room.id == currentRoomId) return false; // Don't duplicate current room
             if (availableRooms.some(r => r.id == room.id)) return false; // Don't duplicate available rooms
             
-            // Filter by session type
+            // For theory sessions, show lab rooms as unavailable if they have lab conflicts
             const roomType = window.allocationManager.getRoomType(room.number);
             if (sessionType === 'lab' && roomType !== 'lab') return false;
-            if (sessionType === 'theory' && roomType === 'lab') return false;
+            // Theory sessions can potentially use lab rooms, so show them as unavailable if occupied
             
             return true;
         });
@@ -1335,7 +1668,7 @@ function populateAvailableRooms() {
         unavailableRooms.forEach(room => {
             const option = document.createElement('option');
             option.value = room.id;
-            option.textContent = `${room.number} (${room.block}) - Capacity: ${room.capacity} - Busy`;
+            option.textContent = `${room.number} (${room.block}) - Capacity: ${getRoomCapacity(room)} - Busy`;
             option.style.color = '#999';
             roomSelect.appendChild(option);
         });
@@ -1357,18 +1690,11 @@ function updateAvailability() {
     const session = allData[sessionIndex];
     const sessionType = session ? session.schedule_type : 'theory';
 
-    // Reset dropdowns to current values (they will be populated on focus)
-    const teacherSelect = document.getElementById('quickEditTeacher');
-    const roomSelect = document.getElementById('quickEditRoom');
+    // Force repopulate available rooms with new day/time
+    populateAvailableRooms();
     
-    // If dropdowns don't have values, they may need to be repopulated with current session data
-    if (!teacherSelect.value && session) {
-        teacherSelect.innerHTML = `<option value="${session.teacher_id}" selected>${session.teacher_name} (${session.staff_code})</option>`;
-    }
-    
-    if (!roomSelect.value && session) {
-        roomSelect.innerHTML = `<option value="${session.room_id}" selected>${session.room_number} (${session.block}) - Capacity: ${session.capacity}</option>`;
-    }
+    // Force repopulate available teachers with new day/time
+    populateAvailableTeachers();
 
     checkValidation();
 }
@@ -1488,38 +1814,70 @@ async function saveQuickEdit(sessionIndex) {
     }
 
     try {
+        console.log(`🔄 Updating session: ${session.course_code} (${session.schedule_type})`);
+        console.log(`   Old: ${session.day} ${getSessionTimeSlot(session)} - ${session.teacher_name} - ${session.room_number}`);
+        console.log(`   New: ${updatedSession.day} ${getSessionTimeSlot(updatedSession)} - ${updatedSession.teacher_name} - ${updatedSession.room_number}`);
+        
         // Apply the change using allocation manager
         const result = await window.allocationManager.applyAllocationChange(sessionIndex, updatedSession);
         
         if (result.success) {
-            // Update the local data
-            allData[sessionIndex] = updatedSession;
+            // ✅ COMPLETE SESSION REPLACEMENT: Delete old session and add new one
             
-            // Update the appropriate array
-            if (updatedSession.schedule_type === 'lab') {
-                const labIndex = labData.findIndex(s => s === session);
-                if (labIndex >= 0) labData[labIndex] = updatedSession;
-            } else {
-                const theoryIndex = theoryData.findIndex(s => s === session);
-                if (theoryIndex >= 0) theoryData[theoryIndex] = updatedSession;
+            // 1. Remove the old session from all arrays
+            const oldSessionIndex = allData.indexOf(session);
+            if (oldSessionIndex >= 0) {
+                allData.splice(oldSessionIndex, 1);
+                console.log(`🗑️ Removed old session from allData at index ${oldSessionIndex}`);
             }
             
-            // Close modal
+            if (session.schedule_type === 'lab') {
+                const labIndex = labData.indexOf(session);
+                if (labIndex >= 0) {
+                    labData.splice(labIndex, 1);
+                    console.log(`🗑️ Removed old lab session at index ${labIndex}`);
+                }
+            } else {
+                const theoryIndex = theoryData.indexOf(session);
+                if (theoryIndex >= 0) {
+                    theoryData.splice(theoryIndex, 1);
+                    console.log(`🗑️ Removed old theory session at index ${theoryIndex}`);
+                }
+            }
+            
+            // 2. Add the new session to appropriate arrays
+            allData.push(updatedSession);
+            
+            if (updatedSession.schedule_type === 'lab') {
+                labData.push(updatedSession);
+                console.log(`➕ Added new lab session`);
+            } else {
+                theoryData.push(updatedSession);
+                console.log(`➕ Added new theory session`);
+            }
+            
+            console.log(`✅ Session replacement completed`);
+            console.log(`   Total sessions: ${allData.length} (Lab: ${labData.length}, Theory: ${theoryData.length})`);
+            
+            // 3. Persist changes to original JSON files
+            await saveChangesToJsonFiles();
+            
+            // 4. Close modal
             const modal = bootstrap.Modal.getInstance(document.getElementById('quickEditModal'));
             modal.hide();
             
-            // Refresh the schedule display
+            // 5. Refresh the schedule display
             renderContent();
             
-            // Show success message
-            showSuccessAlert('Session updated successfully!');
+            // 6. Show success message
+            showSuccessAlert('Session updated successfully! Old session deleted, new session saved to original JSON files.');
             
         } else {
             showErrorAlert(`Failed to save changes: ${result.message}`);
         }
     } catch (error) {
         console.error('Error saving quick edit:', error);
-        showErrorAlert('An error occurred while saving changes.');
+        showErrorAlert('An error occurred while saving changes: ' + error.message);
     }
 }
 
@@ -1911,7 +2269,7 @@ async function validateDrop(sessionIndex, newDay, newTimeSlot) {
         });
     }
     
-    // 3. Enhanced group conflict validation with co-scheduling rules (based on combined_scheduler.py)
+    // 3. ❌ STRICT GROUP RULE: No group overlaps allowed in drag & drop
     const groupConflicts = allData.filter(s => 
         s !== session &&
         s.group_name === session.group_name &&
@@ -1920,151 +2278,22 @@ async function validateDrop(sessionIndex, newDay, newTimeSlot) {
     );
     
     if (groupConflicts.length > 0) {
-        const allSessions = [...groupConflicts, session];
-        const courseCodes = allSessions.map(s => s.course_code);
-        const uniqueCourseCodes = [...new Set(courseCodes)];
+        const courseCodes = groupConflicts.map(s => s.course_code);
+        const sessionTypes = groupConflicts.map(s => s.schedule_type);
         
-        // 🎯 COMPREHENSIVE CO-SCHEDULING VALIDATION (All rules from combined_scheduler.py)
-        const validateCoScheduling = () => {
-            // ✅ RULE 1: Same course code - Basic co-scheduling (Lines 4277-4281, 5579-5658)
-            if (uniqueCourseCodes.length === 1) {
-                return { allowed: true, reason: "Same course co-scheduling", rule: "Lines 4277-4281" };
+        conflicts.push({
+            type: 'group_conflict',
+            severity: 'high',
+            message: `Group ${session.group_name} already has sessions at this time: ${courseCodes.join(', ')} (${sessionTypes.join(', ')})`,
+            details: {
+                group: session.group_name,
+                day: newDay,
+                timeSlot: newTimeSlot,
+                conflictingCourses: courseCodes,
+                conflictingTypes: sessionTypes,
+                rule: 'No group overlaps allowed'
             }
-            
-            // ✅ RULE 2: Virtual instances (e.g., "877-A", "877-B") - Lines 1295-1369
-            const baseCourseIds = uniqueCourseCodes.map(code => {
-                // Handle both formats: "877-A" -> "877", "CS101-B" -> "CS101"
-                const match = code.match(/^([A-Z]*\d+)/);
-                return match ? match[1] : code.split('-')[0];
-            });
-            const uniqueBaseCourses = [...new Set(baseCourseIds)];
-            
-            if (uniqueBaseCourses.length === 1 && courseCodes.some(code => code.includes('-'))) {
-                return { allowed: true, reason: "Virtual instance co-scheduling", rule: "Lines 1295-1369" };
-            }
-            
-            // ✅ RULE 3: Batched sessions (is_batched = true) - Lines 5744-5856
-            const hasBatchedSessions = allSessions.some(s => 
-                s.is_batched === true || 
-                s.session_info?.includes('batch') ||
-                s.co_schedule_info?.includes('batch')
-            );
-            if (hasBatchedSessions && uniqueCourseCodes.length === 1) {
-                return { allowed: true, reason: "Batched session co-scheduling", rule: "Lines 5744-5856" };
-            }
-            
-            // ✅ RULE 4: Cross-department allowances - Lines 3989-4092
-            const departments = allSessions.map(s => s.group_name.split('_S')[0]);
-            const uniqueDepartments = [...new Set(departments)];
-            if (uniqueDepartments.length > 1) {
-                return { allowed: true, reason: "Cross-department scheduling", rule: "Lines 3989-4092" };
-            }
-            
-            // ✅ RULE 5: Co-scheduled session markers (is_co_scheduled = true)
-            const hasCoScheduledMarkers = allSessions.some(s => 
-                s.is_co_scheduled === true || 
-                s.co_schedule_id || 
-                s.co_schedule_info?.includes('Co-scheduled')
-            );
-            if (hasCoScheduledMarkers) {
-                return { allowed: true, reason: "Marked co-scheduled sessions", rule: "Lines 5579-5658" };
-            }
-            
-            // ✅ RULE 6: Large course capacity splitting (140+ students total)
-            const totalStudents = allSessions.reduce((sum, s) => sum + (parseInt(s.student_count) || 0), 0);
-            const roomCapacities = allSessions.map(s => parseInt(s.capacity) || 0);
-            const maxCapacity = Math.max(...roomCapacities);
-            
-            if ((totalStudents >= 140 || maxCapacity >= 140) && uniqueCourseCodes.length === 1) {
-                return { allowed: true, reason: "Large course capacity splitting", rule: "Virtual instances for 140+ students" };
-            }
-            
-            // ✅ RULE 7: Same course instance IDs (different teacher sections)
-            const baseCourseInstanceIds = allSessions.map(s => {
-                const id = s.course_instance_id || s.id;
-                return id ? id.toString().split('-')[0] : s.course_code;
-            });
-            const uniqueInstanceIds = [...new Set(baseCourseInstanceIds)];
-            if (uniqueInstanceIds.length === 1) {
-                return { allowed: true, reason: "Same course instance sections", rule: "Multiple teacher sections" };
-            }
-            
-            // ✅ RULE 8: Large lab co-scheduling (140+ capacity rooms)
-            const isLargeLab = maxCapacity >= 140;
-            const allLabSessions = allSessions.every(s => s.schedule_type === 'lab');
-            if (isLargeLab && allLabSessions) {
-                return { allowed: true, reason: "Large lab co-scheduling", rule: "140+ capacity lab optimization" };
-            }
-            
-            // ✅ RULE 9: Closely related course codes (e.g., CS23331 vs CS23333, CS19741 vs CS19P18)
-            // Special handling for CS19XXX series (numeric and alphanumeric patterns)
-            const cs19Pattern = /^CS19/;
-            const allCS19Series = uniqueCourseCodes.every(code => cs19Pattern.test(code));
-            
-            if (allCS19Series && uniqueCourseCodes.length > 1) {
-                // Allow all CS19XXX combinations (CS19741, CS19P18, CS19321, etc.)
-                sessions.forEach(session => {
-                    session.is_cs19_co_scheduled = true;
-                    session.co_schedule_info = `CS19XXX series co-scheduling (${uniqueCourseCodes.join(', ')})`;
-                });
-                return; // No conflict - CS19XXX series courses can co-schedule
-            }
-            
-            // General pattern for other course series
-            const coursePattern = /^([A-Z]+)(\d{2,3})(.+)$/; // Flexible pattern for various formats
-            const courseMatches = uniqueCourseCodes.map(code => {
-                const match = code.match(coursePattern);
-                return match ? { prefix: match[1], series: match[2], number: match[3] } : null;
-            }).filter(m => m !== null);
-            
-            if (courseMatches.length === uniqueCourseCodes.length && courseMatches.length > 1) {
-                // Check if all courses have same prefix and series (e.g., CS233XX, CS23XXX)
-                const prefixes = [...new Set(courseMatches.map(m => m.prefix))];
-                const series = [...new Set(courseMatches.map(m => m.series))];
-                
-                if (prefixes.length === 1 && series.length === 1) {
-                    return { allowed: true, reason: "Closely related course codes", rule: `${prefixes[0]}${series[0]}XXX series co-scheduling` };
-                }
-                
-                // ✅ RULE 10: Cross-department related courses in same series (e.g., CS23333 vs CB23331, CR23331 vs CS23333)
-                // Allow related department courses in same series
-                if (series.length === 1) {
-                                            const relatedDeptPairs = [
-                            ['CS', 'CB'], // Computer Science & Computer Business
-                            ['CS', 'IT'], // Computer Science & Information Technology
-                            ['CS', 'CR'], // Computer Science & Cryptography/Cyber Security
-                            ['AI', 'CS'], // AI & Computer Science
-                            ['MA', 'CS'], // Mathematics & Computer Science
-                            ['MA', 'ME'], // Mathematics & Mechanical Engineering
-                            ['EC', 'EE'], // Electronics & Electrical
-                            ['ME', 'CE']  // Mechanical & Civil (if applicable)
-                        ];
-                    
-                    const sortedPrefixes = [...prefixes].sort();
-                    const isRelatedDepartments = relatedDeptPairs.some(pair => {
-                        const sortedPair = [...pair].sort();
-                        return JSON.stringify(sortedPrefixes) === JSON.stringify(sortedPair);
-                    });
-                    
-                    if (isRelatedDepartments) {
-                        return { allowed: true, reason: "Cross-department related courses", rule: `${sortedPrefixes.join('-')}${series[0]}XXX cross-department series` };
-                    }
-                }
-            }
-            
-                                    // ✅ ALLOW: Different courses in same group are now allowed
-                        return { 
-                            allowed: true, 
-                            reason: "Different courses allowed in same group", 
-                            rule: "Removed group conflict constraint per user request" 
-                        };
-        };
-        
-        const validationResult = validateCoScheduling();
-        
-        // ✅ ALLOW: Different courses in same group are now allowed
-        console.log(`✅ Different courses allowed: ${session.group_name} - ${validationResult.reason} (${validationResult.rule})`);
-        console.log(`   Courses: ${uniqueCourseCodes.join(', ')} at ${newDay} ${newTimeSlot}`);
+        });
     }
     
     // 4. Department day pattern validation (matching Python scheduler)
@@ -2125,6 +2354,10 @@ async function validateDrop(sessionIndex, newDay, newTimeSlot) {
 async function performSessionMove(sessionIndex, newDay, newTimeSlot) {
     const session = allData[sessionIndex];
     
+    console.log(`🔄 Moving session via drag & drop: ${session.course_code} (${session.schedule_type})`);
+    console.log(`   From: ${session.day} ${getSessionTimeSlot(session)}`);
+    console.log(`   To: ${newDay} ${newTimeSlot}`);
+    
     // Create updated session
     const updatedSession = { ...session };
     updatedSession.day = newDay;
@@ -2146,34 +2379,81 @@ async function performSessionMove(sessionIndex, newDay, newTimeSlot) {
         const result = await window.allocationManager.applyAllocationChange(sessionIndex, updatedSession);
         
         if (result.success) {
-            // Update local data
-            allData[sessionIndex] = updatedSession;
+            // ✅ COMPLETE SESSION REPLACEMENT: Delete old session and add new one
             
-            // Update appropriate array
-            if (updatedSession.schedule_type === 'lab') {
-                const labIndex = labData.findIndex(s => s === session);
-                if (labIndex >= 0) labData[labIndex] = updatedSession;
-            } else {
-                const theoryIndex = theoryData.findIndex(s => s === session);
-                if (theoryIndex >= 0) theoryData[theoryIndex] = updatedSession;
+            // 1. Remove the old session from all arrays
+            const oldSessionIndex = allData.indexOf(session);
+            if (oldSessionIndex >= 0) {
+                allData.splice(oldSessionIndex, 1);
+                console.log(`🗑️ Removed old session from allData at index ${oldSessionIndex}`);
             }
             
-            // Refresh display
+            if (session.schedule_type === 'lab') {
+                const labIndex = labData.indexOf(session);
+                if (labIndex >= 0) {
+                    labData.splice(labIndex, 1);
+                    console.log(`🗑️ Removed old lab session at index ${labIndex}`);
+                }
+            } else {
+                const theoryIndex = theoryData.indexOf(session);
+                if (theoryIndex >= 0) {
+                    theoryData.splice(theoryIndex, 1);
+                    console.log(`🗑️ Removed old theory session at index ${theoryIndex}`);
+                }
+            }
+            
+            // 2. Add the new session to appropriate arrays
+            allData.push(updatedSession);
+            
+            if (updatedSession.schedule_type === 'lab') {
+                labData.push(updatedSession);
+                console.log(`➕ Added new lab session`);
+            } else {
+                theoryData.push(updatedSession);
+                console.log(`➕ Added new theory session`);
+            }
+            
+            console.log(`✅ Session move completed`);
+            console.log(`   Total sessions: ${allData.length} (Lab: ${labData.length}, Theory: ${theoryData.length})`);
+            
+            // 3. Persist changes to original JSON files
+            await saveChangesToJsonFiles();
+            
+            // 4. Refresh display
             renderContent();
+            
         } else {
             throw new Error(result.message);
         }
     } else {
-        // Fallback: direct update without validation
-        allData[sessionIndex] = updatedSession;
+        // Fallback: complete replacement without allocation manager validation
+        console.log('⚠️ No allocation manager available, performing direct replacement');
+        
+        // Remove old session
+        const oldIndex = allData.indexOf(session);
+        if (oldIndex >= 0) {
+            allData.splice(oldIndex, 1);
+        }
+        
+        if (session.schedule_type === 'lab') {
+            const labIndex = labData.indexOf(session);
+            if (labIndex >= 0) labData.splice(labIndex, 1);
+        } else {
+            const theoryIndex = theoryData.indexOf(session);
+            if (theoryIndex >= 0) theoryData.splice(theoryIndex, 1);
+        }
+        
+        // Add new session
+        allData.push(updatedSession);
         
         if (updatedSession.schedule_type === 'lab') {
-            const labIndex = labData.findIndex(s => s === session);
-            if (labIndex >= 0) labData[labIndex] = updatedSession;
+            labData.push(updatedSession);
         } else {
-            const theoryIndex = theoryData.findIndex(s => s === session);
-            if (theoryIndex >= 0) theoryData[theoryIndex] = updatedSession;
+            theoryData.push(updatedSession);
         }
+        
+        // Persist changes
+        await saveChangesToJsonFiles();
         
         renderContent();
     }

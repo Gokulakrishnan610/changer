@@ -225,10 +225,16 @@
                                     Conflicts Detected
                                     <span class="badge bg-light text-dark ms-2" id="conflictCount">0</span>
                                 </h5>
-                                <button class="btn btn-warning btn-sm" onclick="cleanDuplicates()" title="Remove duplicate sessions from dataset">
-                                    <i class="fas fa-broom me-1"></i>
-                                    Clean Duplicates
-                                </button>
+                                <div class="btn-group btn-group-sm">
+                                    <button class="btn btn-warning" onclick="cleanDuplicates()" title="Remove duplicate sessions from dataset">
+                                        <i class="fas fa-broom me-1"></i>
+                                        Clean Duplicates
+                                    </button>
+                                    <button class="btn btn-primary" onclick="showBackupManager()" title="Manage schedule backups">
+                                        <i class="fas fa-history me-1"></i>
+                                        Backup Manager
+                                    </button>
+                                </div>
                             </div>
                         </div>
                         <div class="card-body p-0">

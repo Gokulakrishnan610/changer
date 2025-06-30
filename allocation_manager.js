@@ -382,6 +382,7 @@ class AllocationManager {
     getAvailableRooms(day, timeSlot, courseType = null, excludeSession = null) {
         const availableRooms = [];
         const occupiedRooms = new Set();
+        const labOccupiedRooms = new Set(); // Track rooms occupied specifically by lab sessions
         
         // Find all rooms occupied at this time slot
         this.allData.forEach(session => {
@@ -395,18 +396,38 @@ class AllocationManager {
                 time_range: timeSlot
             }, session)) {
                 occupiedRooms.add(session.room_id);
+                
+                // Track lab-specific occupancy
+                if (session.schedule_type === 'lab') {
+                    labOccupiedRooms.add(session.room_id);
+                }
             }
         });
         
         // Filter available rooms
         Array.from(this.rooms).forEach(roomStr => {
             const room = JSON.parse(roomStr);
-            if (!occupiedRooms.has(room.id)) {
-                // If course type is specified, filter by room type
-                const roomType = this.getRoomType(room.number);
-                if (!courseType || 
-                    (courseType === 'lab' && roomType === 'lab') ||
-                    (courseType === 'theory' && roomType === 'theory')) {
+            const roomType = this.getRoomType(room.number);
+            
+            if (!courseType) {
+                // No filter specified - return all non-occupied rooms
+                if (!occupiedRooms.has(room.id)) {
+                    availableRooms.push(room);
+                }
+            } else if (courseType === 'lab') {
+                // Lab sessions can only use lab rooms that are completely free
+                if (roomType === 'lab' && !occupiedRooms.has(room.id)) {
+                    availableRooms.push(room);
+                }
+            } else if (courseType === 'theory') {
+                // Theory sessions can use:
+                // 1. Theory rooms that are completely free
+                // 2. Lab rooms that are NOT occupied by lab sessions
+                if (!occupiedRooms.has(room.id)) {
+                    // Room is completely free
+                    availableRooms.push(room);
+                } else if (roomType === 'lab' && !labOccupiedRooms.has(room.id)) {
+                    // Lab room is occupied but not by a lab session (theory can share)
                     availableRooms.push(room);
                 }
             }
@@ -932,10 +953,12 @@ class AllocationManager {
         };
     }
 
-    // Check group availability (enhanced with co-scheduling rules from combined_scheduler.py)
+    // ❌ STRICT GROUP RULE: No group should have overlapping sessions
+    // - Lab and theory groups cannot overlap in time
+    // - Any group overlap is treated as a conflict
+    // - No exceptions or co-scheduling allowed
     checkGroupAvailability(newSession, tempData) {
         const conflicts = [];
-        const warnings = [];
         
         const groupSessions = tempData.filter(s => 
             s.group_name === newSession.group_name &&
@@ -945,171 +968,27 @@ class AllocationManager {
         );
 
         if (groupSessions.length > 0) {
-            // Get all sessions including the new one for co-scheduling analysis
-            const allSessions = [...groupSessions, newSession];
-            const courseCodes = allSessions.map(s => s.course_code);
-            const uniqueCourseCodes = [...new Set(courseCodes)];
-            
-            // 🎯 COMPREHENSIVE CO-SCHEDULING VALIDATION (All rules from combined_scheduler.py)
-            const validateCoScheduling = () => {
-                // ✅ RULE 1: Same course code - Basic co-scheduling (Lines 4277-4281, 5579-5658)
-                if (uniqueCourseCodes.length === 1) {
-                    return { allowed: true, reason: "Same course co-scheduling", rule: "Lines 4277-4281" };
-                }
-                
-                // ✅ RULE 2: Virtual instances (e.g., "877-A", "877-B") - Lines 1295-1369
-                const baseCourseIds = uniqueCourseCodes.map(code => {
-                    const match = code.match(/^([A-Z]*\d+)/);
-                    return match ? match[1] : code.split('-')[0];
-                });
-                const uniqueBaseCourses = [...new Set(baseCourseIds)];
-                
-                if (uniqueBaseCourses.length === 1 && courseCodes.some(code => code.includes('-'))) {
-                    return { allowed: true, reason: "Virtual instance co-scheduling", rule: "Lines 1295-1369" };
-                }
-                
-                // ✅ RULE 3: Batched sessions (is_batched = true) - Lines 5744-5856
-                const hasBatchedSessions = allSessions.some(s => 
-                    s.is_batched === true || 
-                    s.session_info?.includes('batch') ||
-                    s.co_schedule_info?.includes('batch')
-                );
-                if (hasBatchedSessions && uniqueCourseCodes.length === 1) {
-                    return { allowed: true, reason: "Batched session co-scheduling", rule: "Lines 5744-5856" };
-                }
-                
-                // ✅ RULE 4: Cross-department allowances - Lines 3989-4092
-                const departments = allSessions.map(s => s.group_name.split('_S')[0]);
-                const uniqueDepartments = [...new Set(departments)];
-                if (uniqueDepartments.length > 1) {
-                    return { allowed: true, reason: "Cross-department scheduling", rule: "Lines 3989-4092" };
-                }
-                
-                // ✅ RULE 5: Co-scheduled session markers (is_co_scheduled = true)
-                const hasCoScheduledMarkers = allSessions.some(s => 
-                    s.is_co_scheduled === true || 
-                    s.co_schedule_id || 
-                    s.co_schedule_info?.includes('Co-scheduled')
-                );
-                if (hasCoScheduledMarkers) {
-                    return { allowed: true, reason: "Marked co-scheduled sessions", rule: "Lines 5579-5658" };
-                }
-                
-                // ✅ RULE 6: Large course capacity splitting (140+ students total)
-                const totalStudents = allSessions.reduce((sum, s) => sum + (parseInt(s.student_count) || 0), 0);
-                const roomCapacities = allSessions.map(s => parseInt(s.capacity) || 0);
-                const maxCapacity = Math.max(...roomCapacities);
-                
-                if ((totalStudents >= 140 || maxCapacity >= 140) && uniqueCourseCodes.length === 1) {
-                    return { allowed: true, reason: "Large course capacity splitting", rule: "Virtual instances for 140+ students" };
-                }
-                
-                // ✅ RULE 7: Same course instance IDs (different teacher sections) 
-                const courseInstanceIds = allSessions.map(s => s.course_instance_id);
-                const uniqueCourseInstances = [...new Set(courseInstanceIds)];
-                if (uniqueCourseInstances.length === 1) {
-                    return { allowed: true, reason: "Same course instance batching", rule: "Multiple instances of same course" };
-                }
-                
-                // ✅ RULE 8: Large lab co-scheduling (140+ capacity rooms)
-                const isLargeLab = maxCapacity >= 140;
-                const allLabSessions = allSessions.every(s => s.schedule_type === 'lab');
-                if (isLargeLab && allLabSessions) {
-                    return { allowed: true, reason: "Large lab co-scheduling", rule: "140+ capacity lab optimization" };
-                }
-                
-                // ✅ RULE 9: Closely related course codes (e.g., CS23331 vs CS23333, CS19741 vs CS19P18)
-                // Special handling for CS19XXX series (numeric and alphanumeric patterns)
-                const cs19Pattern = /^CS19/;
-                const allCS19Series = uniqueCourseCodes.every(code => cs19Pattern.test(code));
-                
-                if (allCS19Series && uniqueCourseCodes.length > 1) {
-                    // Allow all CS19XXX combinations (CS19741, CS19P18, CS19321, etc.)
-                    sessions.forEach(s => {
-                        s.session.is_cs19_co_scheduled = true;
-                        s.session.co_schedule_info = `CS19XXX series co-scheduling (${uniqueCourseCodes.join(', ')})`;
-                    });
-                    return; // No conflict - CS19XXX series courses can co-schedule
-                }
-                
-                // General pattern for other course series
-                const coursePattern = /^([A-Z]+)(\d{2,3})(.+)$/; // Flexible pattern for various formats
-                const courseMatches = uniqueCourseCodes.map(code => {
-                    const match = code.match(coursePattern);
-                    return match ? { prefix: match[1], series: match[2], number: match[3] } : null;
-                }).filter(m => m !== null);
-                
-                if (courseMatches.length === uniqueCourseCodes.length && courseMatches.length > 1) {
-                    // Check if all courses have same prefix and series (e.g., CS233XX, CS23XXX)
-                    const prefixes = [...new Set(courseMatches.map(m => m.prefix))];
-                    const series = [...new Set(courseMatches.map(m => m.series))];
-                    
-                    if (prefixes.length === 1 && series.length === 1) {
-                        return { allowed: true, reason: "Closely related course codes", rule: `${prefixes[0]}${series[0]}XXX series co-scheduling` };
+            // ❌ STRICT RULE: No group overlaps allowed
+            groupSessions.forEach(session => {
+                conflicts.push({
+                    type: 'group_conflict',
+                    message: `Group ${newSession.group_name} already has a session at this time: ${session.course_code} (${session.schedule_type}) with ${session.teacher_name} in room ${session.room_number}`,
+                    conflictingSession: session,
+                    details: {
+                        currentSession: `${newSession.course_code} (${newSession.schedule_type})`,
+                        conflictingSession: `${session.course_code} (${session.schedule_type})`,
+                        timeSlot: this.getTimeKey(session),
+                        day: session.day,
+                        group: session.group_name
                     }
-                    
-                    // ✅ RULE 10: Cross-department related courses in same series (e.g., CS23333 vs CB23331, CR23331 vs CS23333)
-                    // Allow related department courses in same series
-                    if (series.length === 1) {
-                        const relatedDeptPairs = [
-                            ['CS', 'CB'], // Computer Science & Computer Business
-                            ['CS', 'IT'], // Computer Science & Information Technology
-                            ['CS', 'CR'], // Computer Science & Cryptography/Cyber Security
-                            ['AI', 'CS'], // AI & Computer Science
-                            ['MA', 'CS'], // Mathematics & Computer Science
-                            ['MA', 'ME'], // Mathematics & Mechanical Engineering
-                            ['EC', 'EE'], // Electronics & Electrical
-                            ['ME', 'CE']  // Mechanical & Civil (if applicable)
-                        ];
-                        
-                        const sortedPrefixes = [...prefixes].sort();
-                        const isRelatedDepartments = relatedDeptPairs.some(pair => {
-                            const sortedPair = [...pair].sort();
-                            return JSON.stringify(sortedPrefixes) === JSON.stringify(sortedPair);
-                        });
-                        
-                        if (isRelatedDepartments) {
-                            return { allowed: true, reason: "Cross-department related courses", rule: `${sortedPrefixes.join('-')}${series[0]}XXX cross-department series` };
-                        }
-                    }
-                }
-                
-                // ❌ CONFLICT: Different courses not allowed
-                return { 
-                    allowed: false, 
-                    reason: "Different courses in same group", 
-                    rule: "Basic group conflict constraint" 
-                };
-            };
-            
-            const validationResult = validateCoScheduling();
-            
-            if (validationResult.allowed) {
-                // ✅ CO-SCHEDULING ALLOWED
-                warnings.push({
-                    type: 'co_scheduling_allowed',
-                    message: `✅ Co-scheduling allowed: ${validationResult.reason} - ${uniqueCourseCodes.join(', ')} for group ${newSession.group_name}`,
-                    rule: validationResult.rule,
-                    note: `${validationResult.reason} per combined_scheduler.py rules`
                 });
-                console.log(`✅ Co-scheduling allowed: ${newSession.group_name} - ${validationResult.reason} (${validationResult.rule})`);
-                return { isValid: true, conflicts: [], warnings: warnings };
-            } else {
-                // ✅ ALLOW: Different courses in same group are now allowed
-                warnings.push({
-                    type: 'different_courses_allowed',
-                    message: `✅ Different courses allowed: ${validationResult.reason} - ${uniqueCourseCodes.join(', ')} for group ${newSession.group_name}`,
-                    rule: validationResult.rule,
-                    note: `${validationResult.reason} - constraint removed per user request`
-                });
-                console.log(`✅ Different courses allowed: ${newSession.group_name} - ${validationResult.reason} (${validationResult.rule})`);
-            }
+            });
         }
 
         return {
-            isValid: true, // Always valid now since different courses in same group are allowed
+            isValid: conflicts.length === 0,
             conflicts: conflicts,
-            warnings: warnings
+            warnings: []
         };
     }
 
@@ -1171,7 +1050,8 @@ class AllocationManager {
 
     // Apply allocation change
     async applyAllocationChange(sessionIndex, updatedSession) {
-        const validation = this.validateAllocation(updatedSession, this.allData[sessionIndex]);
+        const originalSession = this.allData[sessionIndex];
+        const validation = this.validateAllocation(updatedSession, originalSession);
         
         if (!validation.isValid) {
             return {
@@ -1182,29 +1062,53 @@ class AllocationManager {
             };
         }
 
-        // Apply the change
-        const originalSession = { ...this.allData[sessionIndex] };
-        this.allData[sessionIndex] = { ...updatedSession };
+        console.log(`🔄 Applying allocation change: ${originalSession.course_code} (${originalSession.schedule_type})`);
+        console.log(`   Old: ${originalSession.day} ${this.getTimeKey(originalSession)} - ${originalSession.teacher_name} - ${originalSession.room_number}`);
+        console.log(`   New: ${updatedSession.day} ${this.getTimeKey(updatedSession)} - ${updatedSession.teacher_name} - ${updatedSession.room_number}`);
 
-        // Update the appropriate data array
-        if (updatedSession.schedule_type === 'lab') {
-            const labIndex = this.labData.findIndex(s => s === originalSession);
+        // ✅ COMPLETE SESSION REPLACEMENT: Delete old session and add new one
+        
+        // 1. Remove the old session from all arrays
+        const allDataIndex = this.allData.indexOf(originalSession);
+        if (allDataIndex >= 0) {
+            this.allData.splice(allDataIndex, 1);
+            console.log(`🗑️ Removed old session from allData at index ${allDataIndex}`);
+        }
+
+        if (originalSession.schedule_type === 'lab') {
+            const labIndex = this.labData.indexOf(originalSession);
             if (labIndex >= 0) {
-                this.labData[labIndex] = { ...updatedSession };
+                this.labData.splice(labIndex, 1);
+                console.log(`🗑️ Removed old lab session at index ${labIndex}`);
             }
         } else {
-            const theoryIndex = this.theoryData.findIndex(s => s === originalSession);
+            const theoryIndex = this.theoryData.indexOf(originalSession);
             if (theoryIndex >= 0) {
-                this.theoryData[theoryIndex] = { ...updatedSession };
+                this.theoryData.splice(theoryIndex, 1);
+                console.log(`🗑️ Removed old theory session at index ${theoryIndex}`);
             }
         }
+
+        // 2. Add the new session to appropriate arrays
+        this.allData.push(updatedSession);
+
+        if (updatedSession.schedule_type === 'lab') {
+            this.labData.push(updatedSession);
+            console.log(`➕ Added new lab session`);
+        } else {
+            this.theoryData.push(updatedSession);
+            console.log(`➕ Added new theory session`);
+        }
+
+        console.log(`✅ Allocation change completed`);
+        console.log(`   Total sessions: ${this.allData.length} (Lab: ${this.labData.length}, Theory: ${this.theoryData.length})`);
 
         // Re-run conflict detection
         this.detectAllConflicts();
 
         return {
             success: true,
-            message: 'Allocation change applied successfully',
+            message: 'Allocation change applied successfully - old session deleted, new session added',
             warnings: validation.warnings,
             conflicts: this.conflicts
         };
@@ -1242,6 +1146,7 @@ class AllocationManager {
     getAvailableRooms(day, timeSlot, courseType = null, excludeSession = null) {
         const availableRooms = [];
         const occupiedRooms = new Set();
+        const labOccupiedRooms = new Set(); // Track rooms occupied specifically by lab sessions
         
         // Find all rooms occupied at this time slot
         this.allData.forEach(session => {
@@ -1255,18 +1160,38 @@ class AllocationManager {
                 time_range: timeSlot
             }, session)) {
                 occupiedRooms.add(session.room_id);
+                
+                // Track lab-specific occupancy
+                if (session.schedule_type === 'lab') {
+                    labOccupiedRooms.add(session.room_id);
+                }
             }
         });
         
         // Filter available rooms
         Array.from(this.rooms).forEach(roomStr => {
             const room = JSON.parse(roomStr);
-            if (!occupiedRooms.has(room.id)) {
-                // If course type is specified, filter by room type
-                const roomType = this.getRoomType(room.number);
-                if (!courseType || 
-                    (courseType === 'lab' && roomType === 'lab') ||
-                    (courseType === 'theory' && roomType === 'theory')) {
+            const roomType = this.getRoomType(room.number);
+            
+            if (!courseType) {
+                // No filter specified - return all non-occupied rooms
+                if (!occupiedRooms.has(room.id)) {
+                    availableRooms.push(room);
+                }
+            } else if (courseType === 'lab') {
+                // Lab sessions can only use lab rooms that are completely free
+                if (roomType === 'lab' && !occupiedRooms.has(room.id)) {
+                    availableRooms.push(room);
+                }
+            } else if (courseType === 'theory') {
+                // Theory sessions can use:
+                // 1. Theory rooms that are completely free
+                // 2. Lab rooms that are NOT occupied by lab sessions
+                if (!occupiedRooms.has(room.id)) {
+                    // Room is completely free
+                    availableRooms.push(room);
+                } else if (roomType === 'lab' && !labOccupiedRooms.has(room.id)) {
+                    // Lab room is occupied but not by a lab session (theory can share)
                     availableRooms.push(room);
                 }
             }
@@ -1903,6 +1828,9 @@ async function saveSessionChanges() {
         const result = await allocationManager.applyAllocationChange(sessionIndex, updatedSession);
         
         if (result.success) {
+            // Save changes to JSON files
+            await saveChangesToJsonFiles();
+            
             // Close modal
             const modal = bootstrap.Modal.getInstance(document.getElementById('editSessionModal'));
             modal.hide();
@@ -1912,7 +1840,7 @@ async function saveSessionChanges() {
             renderConflicts();
             
             // Show success message
-            showAlert('success', 'Session updated successfully!');
+            showAlert('success', 'Session updated successfully! Changes saved to JSON files.');
             
             // Clear current editing session
             currentEditingSession = null;
@@ -1942,6 +1870,409 @@ function showAlert(type, message) {
             alert.parentNode.removeChild(alert);
         }
     }, 5000);
+}
+
+// ==== JSON FILE PERSISTENCE FUNCTIONS ====
+
+// Save changes directly to the original JSON files
+async function saveChangesToJsonFiles() {
+    try {
+        console.log('💾 Saving allocation changes to original JSON files...');
+        
+        // Save updated data directly to original files (server creates backups automatically)
+        await saveUpdatedJsonFiles();
+        
+        console.log('✅ Allocation changes saved to original JSON files successfully');
+        showAlert('success', 'Changes saved to original JSON files successfully!');
+        
+    } catch (error) {
+        console.error('❌ Error saving changes to JSON files:', error);
+        showAlert('danger', 'Failed to save changes to JSON files: ' + error.message);
+    }
+}
+
+// Create backup copies of the original JSON files
+async function createBackupFiles() {
+    try {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+        
+        // Create backup data objects
+        const backupData = {
+            lab: [...allocationManager.labData],
+            theory: [...allocationManager.theoryData],
+            timestamp: timestamp,
+            originalFiles: {
+                lab: './output/combined_lab_schedule.json',
+                theory: './output/combined_theory_schedule.json'
+            }
+        };
+        
+        // Store backup in localStorage
+        localStorage.setItem('allocation_backup_' + timestamp, JSON.stringify(backupData));
+        
+        // Create downloadable backup files
+        downloadBackupFiles(backupData);
+        
+        console.log(`✅ Allocation Manager backup created: ${timestamp}`);
+        
+    } catch (error) {
+        console.error('❌ Error creating backup files:', error);
+        throw new Error('Failed to create backup files');
+    }
+}
+
+// Download backup files
+function downloadBackupFiles(backupData) {
+    try {
+        // Download lab backup
+        downloadJsonFile(backupData.lab, `combined_lab_schedule_backup_${backupData.timestamp}.json`);
+        
+        // Download theory backup
+        downloadJsonFile(backupData.theory, `combined_theory_schedule_backup_${backupData.timestamp}.json`);
+        
+        console.log('✅ Backup files prepared for download');
+        
+    } catch (error) {
+        console.error('❌ Error preparing backup downloads:', error);
+    }
+}
+
+// Save updated JSON files directly to the original files
+async function saveUpdatedJsonFiles() {
+    try {
+        console.log('📤 Saving allocation data to original files...');
+        
+        // Save both lab and theory schedules to original files
+        const savePromises = [
+            saveJsonToServer(allocationManager.labData, './output/combined_lab_schedule.json'),
+            saveJsonToServer(allocationManager.theoryData, './output/combined_theory_schedule.json')
+        ];
+        
+        const results = await Promise.all(savePromises);
+        
+        console.log('✅ All allocation files saved to original location successfully');
+        console.log(`   - Lab sessions: ${allocationManager.labData.length} saved`);
+        console.log(`   - Theory sessions: ${allocationManager.theoryData.length} saved`);
+        
+        return results;
+        
+    } catch (error) {
+        console.error('❌ Error saving updated JSON files:', error);
+        throw new Error(`Failed to save allocation files to original location: ${error.message}`);
+    }
+}
+
+// Save JSON data directly to server via API
+async function saveJsonToServer(data, filepath) {
+    console.log(`📡 Sending ${data.length} sessions to ${filepath}...`);
+    
+    const response = await fetch('/api/save-schedule', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            data: data,
+            filepath: filepath
+        })
+    });
+    
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Server error (${response.status}): ${errorText}`);
+    }
+    
+    const result = await response.json();
+    console.log(`✅ ${filepath}: ${result.message}`);
+    
+    return result;
+}
+
+// Download JSON file to user's computer
+function downloadJsonFile(data, filename) {
+    const jsonString = JSON.stringify(data, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    URL.revokeObjectURL(url);
+}
+
+// Show instructions for manual file replacement
+function showSaveInstructions() {
+    const instructionsModal = document.createElement('div');
+    instructionsModal.className = 'modal fade';
+    instructionsModal.id = 'saveInstructionsModal';
+    instructionsModal.innerHTML = `
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-warning text-dark">
+                    <h5 class="modal-title">
+                        <i class="fas fa-download me-2"></i>
+                        Manual File Update Required
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>Your changes have been downloaded as JSON files.</strong> 
+                        Please replace the original files to persist your changes.
+                    </div>
+                    
+                    <h6>📋 Instructions:</h6>
+                    <ol class="list-group list-group-numbered">
+                        <li class="list-group-item">
+                            <strong>Locate the downloaded files:</strong>
+                            <ul class="mt-2">
+                                <li><code>combined_lab_schedule.json</code></li>
+                                <li><code>combined_theory_schedule.json</code></li>
+                                <li><code>combined_lab_schedule_backup_[timestamp].json</code> (backup)</li>
+                                <li><code>combined_theory_schedule_backup_[timestamp].json</code> (backup)</li>
+                            </ul>
+                        </li>
+                        <li class="list-group-item">
+                            <strong>Replace the original files:</strong>
+                            <br>Copy the downloaded files to: <code>./output/</code> directory
+                        </li>
+                        <li class="list-group-item">
+                            <strong>Keep backups safe:</strong>
+                            <br>Store the backup files in a secure location
+                        </li>
+                    </ol>
+                    
+                    <div class="alert alert-success mt-3">
+                        <i class="fas fa-shield-alt me-2"></i>
+                        <strong>Backup files created automatically</strong> - Your original data is safe!
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" onclick="downloadAllFilesAllocation()">
+                        <i class="fas fa-download me-1"></i>
+                        Download All Files Again
+                    </button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        Got It
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(instructionsModal);
+    
+    const modal = new bootstrap.Modal(instructionsModal);
+    modal.show();
+    
+    // Cleanup when modal is hidden
+    instructionsModal.addEventListener('hidden.bs.modal', () => {
+        instructionsModal.remove();
+    });
+}
+
+// Download all files again (allocation manager version)
+function downloadAllFilesAllocation() {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+    
+    // Download updated files
+    downloadJsonFile(allocationManager.labData, 'combined_lab_schedule.json');
+    downloadJsonFile(allocationManager.theoryData, 'combined_theory_schedule.json');
+    
+    // Download backup files
+    downloadJsonFile(allocationManager.labData, `combined_lab_schedule_backup_${timestamp}.json`);
+    downloadJsonFile(allocationManager.theoryData, `combined_theory_schedule_backup_${timestamp}.json`);
+    
+    showAlert('success', 'All files downloaded successfully!');
+}
+
+// ==== BACKUP MANAGEMENT FUNCTIONS ====
+
+// List all available backups
+function listAvailableBackups() {
+    const backups = [];
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('schedule_backup_') || key.startsWith('allocation_backup_'))) {
+            try {
+                const backup = JSON.parse(localStorage.getItem(key));
+                backups.push({
+                    key: key,
+                    timestamp: backup.timestamp,
+                    labSessions: backup.lab.length,
+                    theorySessions: backup.theory.length,
+                    source: key.startsWith('schedule_') ? 'Interactive Scheduler' : 'Allocation Manager'
+                });
+            } catch (e) {
+                console.warn('Invalid backup found:', key);
+            }
+        }
+    }
+    return backups.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+
+// Restore from backup
+function restoreFromBackup(backupKey) {
+    try {
+        const backupData = JSON.parse(localStorage.getItem(backupKey));
+        if (!backupData) {
+            throw new Error('Backup not found');
+        }
+        
+        // Restore data to allocation manager
+        allocationManager.labData = [...backupData.lab];
+        allocationManager.theoryData = [...backupData.theory];
+        allocationManager.allData = [...backupData.lab, ...backupData.theory];
+        
+        // Re-extract unique values and detect conflicts
+        allocationManager.extractUniqueValues();
+        allocationManager.detectAllConflicts();
+        
+        // Refresh UI
+        renderStatistics();
+        renderConflicts();
+        
+        showAlert('success', `Restored from backup: ${backupData.timestamp}`);
+        
+    } catch (error) {
+        console.error('Error restoring backup:', error);
+        showAlert('danger', 'Failed to restore backup: ' + error.message);
+    }
+}
+
+// Add backup management UI
+function showBackupManager() {
+    const backups = listAvailableBackups();
+    
+    const backupModal = document.createElement('div');
+    backupModal.className = 'modal fade';
+    backupModal.id = 'backupManagerModal';
+    backupModal.innerHTML = `
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title">
+                        <i class="fas fa-history me-2"></i>
+                        Backup Manager
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    ${backups.length === 0 ? `
+                        <div class="alert alert-info text-center">
+                            <i class="fas fa-info-circle me-2"></i>
+                            No backups available. Backups are created automatically when you make changes.
+                        </div>
+                    ` : `
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Timestamp</th>
+                                        <th>Source</th>
+                                        <th>Lab Sessions</th>
+                                        <th>Theory Sessions</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${backups.map(backup => `
+                                        <tr>
+                                            <td>
+                                                <small class="text-muted">${backup.timestamp.replace('T', ' ')}</small>
+                                            </td>
+                                            <td>
+                                                <span class="badge ${backup.source === 'Interactive Scheduler' ? 'bg-info' : 'bg-primary'}">${backup.source}</span>
+                                            </td>
+                                            <td>
+                                                <span class="badge bg-info">${backup.labSessions}</span>
+                                            </td>
+                                            <td>
+                                                <span class="badge bg-success">${backup.theorySessions}</span>
+                                            </td>
+                                            <td>
+                                                <button class="btn btn-sm btn-outline-primary me-1" 
+                                                        onclick="restoreFromBackup('${backup.key}')">
+                                                    <i class="fas fa-undo me-1"></i>Restore
+                                                </button>
+                                                <button class="btn btn-sm btn-outline-danger" 
+                                                        onclick="deleteBackup('${backup.key}')">
+                                                    <i class="fas fa-trash me-1"></i>Delete
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    `}
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-warning" onclick="clearAllBackups()">
+                        <i class="fas fa-trash-alt me-1"></i>
+                        Clear All Backups
+                    </button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(backupModal);
+    
+    const modal = new bootstrap.Modal(backupModal);
+    modal.show();
+    
+    // Cleanup when modal is hidden
+    backupModal.addEventListener('hidden.bs.modal', () => {
+        backupModal.remove();
+    });
+}
+
+// Delete a specific backup
+function deleteBackup(backupKey) {
+    if (confirm('Are you sure you want to delete this backup?')) {
+        localStorage.removeItem(backupKey);
+        showAlert('success', 'Backup deleted successfully');
+        
+        // Refresh backup manager if open
+        const modal = document.getElementById('backupManagerModal');
+        if (modal) {
+            bootstrap.Modal.getInstance(modal).hide();
+            setTimeout(() => showBackupManager(), 300);
+        }
+    }
+}
+
+// Clear all backups
+function clearAllBackups() {
+    if (confirm('Are you sure you want to delete ALL backups? This action cannot be undone.')) {
+        const keys = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && (key.startsWith('schedule_backup_') || key.startsWith('allocation_backup_'))) {
+                keys.push(key);
+            }
+        }
+        
+        keys.forEach(key => localStorage.removeItem(key));
+        
+        showAlert('success', `${keys.length} backups cleared successfully`);
+        
+        // Refresh backup manager
+        const modal = document.getElementById('backupManagerModal');
+        if (modal) {
+            bootstrap.Modal.getInstance(modal).hide();
+            setTimeout(() => showBackupManager(), 300);
+        }
+    }
 }
 
 // Global allocation manager instance
