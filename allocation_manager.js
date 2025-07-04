@@ -392,7 +392,13 @@ class AllocationManager {
                 // Determine room type and set appropriate default capacity
                 const roomType = this.getRoomType(session.room_number);
                 const defaultCapacity = roomType === 'theory' ? 70 : 35;
-                const actualCapacity = session.capacity || defaultCapacity;
+                let actualCapacity = session.capacity || defaultCapacity;
+                
+                // Special handling for KSL02 and A104/105 room capacity
+                if (session.room_number === 'KSL02' || session.room_number === 'A104/105') {
+                    actualCapacity = 140;
+                    console.log(`✅ Setting ${session.room_number} capacity to 140 in allocation manager`);
+                }
                 
                 this.rooms.add(JSON.stringify({
                     id: session.room_id,
@@ -1177,17 +1183,23 @@ class AllocationManager {
         // Detect capacity violations
         this.allData.forEach((session, index) => {
             if (session.student_count && session.capacity) {
-                if (session.student_count > session.capacity) {
+                // Special handling for KSL02 and A104/105 room capacity
+                let roomCapacity = session.capacity;
+                if (session.room_number === 'KSL02' || session.room_number === 'A104/105') {
+                    roomCapacity = 140;
+                }
+                
+                if (session.student_count > roomCapacity) {
                     this.conflicts.push({
                         type: 'capacity_violation',
                         severity: 'medium',
-                        message: `Room ${session.room_number} capacity exceeded (${session.student_count}/${session.capacity})`,
+                        message: `Room ${session.room_number} capacity exceeded (${session.student_count}/${roomCapacity})`,
                         sessions: [{ ...session, originalIndex: index }],
                         details: {
                             room: session.room_number,
-                            capacity: session.capacity,
+                            capacity: roomCapacity,
                             students: session.student_count,
-                            overflow: session.student_count - session.capacity
+                            overflow: session.student_count - roomCapacity
                         }
                     });
                 }
@@ -1566,18 +1578,25 @@ class AllocationManager {
         const warnings = [];
         
         if (newSession.student_count && newSession.capacity) {
-            if (newSession.student_count > newSession.capacity) {
+            // Special handling for KSL02 and A104/105 room capacity
+            let roomCapacity = newSession.capacity;
+            if (newSession.room_number === 'KSL02' || newSession.room_number === 'A104/105') {
+                roomCapacity = 140;
+                console.log(`✅ Using ${newSession.room_number} capacity of 140 for validation`);
+            }
+            
+            if (newSession.student_count > roomCapacity) {
                 return {
                     isValid: false,
                     conflicts: [{
                         type: 'capacity_violation',
-                        message: `Student count (${newSession.student_count}) exceeds room capacity (${newSession.capacity})`
+                        message: `Student count (${newSession.student_count}) exceeds room capacity (${roomCapacity})`
                     }]
                 };
-            } else if (newSession.student_count > newSession.capacity * 0.9) {
+            } else if (newSession.student_count > roomCapacity * 0.9) {
                 warnings.push({
                     type: 'capacity_warning',
-                    message: `Room utilization is high (${((newSession.student_count / newSession.capacity) * 100).toFixed(1)}%)`
+                    message: `Room utilization is high (${((newSession.student_count / roomCapacity) * 100).toFixed(1)}%)`
                 });
             }
         }

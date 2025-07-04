@@ -1309,17 +1309,23 @@ function detectConflicts() {
         // Detect capacity violations (EXACT COPY FROM ALLOCATION MANAGER)
         allData.forEach((session, index) => {
             if (session.student_count && session.capacity) {
-                if (session.student_count > session.capacity) {
+                // Special handling for KSL02 and A104/105 room capacity
+                let roomCapacity = session.capacity;
+                if (session.room_number === 'KSL02' || session.room_number === 'A104/105') {
+                    roomCapacity = 140;
+                }
+                
+                if (session.student_count > roomCapacity) {
                     detectedConflicts.push({
                         type: 'capacity_violation',
                         severity: 'medium',
-                        message: `Room ${session.room_number} capacity exceeded (${session.student_count}/${session.capacity})`,
+                        message: `Room ${session.room_number} capacity exceeded (${session.student_count}/${roomCapacity})`,
                         sessions: [{ ...session, originalIndex: index }],
                         details: {
                             room: session.room_number,
-                            capacity: session.capacity,
+                            capacity: roomCapacity,
                             students: session.student_count,
-                            overflow: session.student_count - session.capacity
+                            overflow: session.student_count - roomCapacity
                         }
                     });
                 }
@@ -1514,7 +1520,7 @@ function detectTimeSlotExclusivityConflicts() {
                 const session2 = sessions[j].session;
                 
                 // Check if sessions overlap in time
-                if (doTimeSlotsOverlap(session1, session2)) {
+                if (doTimeSlotsOverlap(getSessionTimeSlot(session1), getSessionTimeSlot(session2))) {
                     // Different session types within same group = conflict
                     if (session1.schedule_type !== session2.schedule_type) {
             detectedConflicts.push({
@@ -2267,6 +2273,11 @@ function populateAvailableTeachers() {
 
 // Helper function to get room capacity with fallback
 function getRoomCapacity(room) {
+    // Special handling for KSL02 and A104/105 room capacity
+    if (room.number === 'KSL02' || room.number === 'A104/105') {
+        return 140;
+    }
+    
     if (room.capacity && room.capacity !== null && room.capacity !== undefined) {
         return room.capacity;
     }
@@ -2447,7 +2458,12 @@ function checkValidation() {
         .map(r => JSON.parse(r))
         .find(r => r.id == roomId);
     if (room) {
-        roomCapacity = room.capacity;
+        // Special handling for KSL02 and A104/105 room capacity
+        if (room.number === 'KSL02' || room.number === 'A104/105') {
+            roomCapacity = 140;
+        } else {
+            roomCapacity = room.capacity;
+        }
         // Update capacity field
         const capacityField = document.getElementById('quickEditRoomCapacity');
         if (capacityField) {
@@ -2455,12 +2471,11 @@ function checkValidation() {
         }
     }
 
-    // Check for conflicts (excluding current session)
+    // ✅ FIXED: Check for conflicts using proper time overlap detection (excluding current session)
     const conflictingSessions = allData.filter(session => 
         session !== currentSession &&
         session.day === day &&
-        ((session.schedule_type === 'lab' && session.time_range === timeSlot) ||
-         (session.schedule_type === 'theory' && session.time_slot === timeSlot))
+        doTimeSlotsOverlap(getSessionTimeSlot(session), timeSlot)
     );
 
     const teacherConflicts = conflictingSessions.filter(session => session.teacher_id == teacherId);
@@ -2653,9 +2668,15 @@ async function saveQuickEdit(sessionIndex) {
 
     // Check for capacity violations
     if (updatedSession.student_count && updatedSession.capacity) {
-        if (updatedSession.student_count > updatedSession.capacity) {
+        // Special handling for KSL02 and A104/105 room capacity
+        let roomCapacity = updatedSession.capacity;
+        if (updatedSession.room_number === 'KSL02' || updatedSession.room_number === 'A104/105') {
+            roomCapacity = 140;
+        }
+        
+        if (updatedSession.student_count > roomCapacity) {
             const confirmOverride = confirm(
-                `⚠️ Warning: Student count (${updatedSession.student_count}) exceeds room capacity (${updatedSession.capacity}).\n\n` +
+                `⚠️ Warning: Student count (${updatedSession.student_count}) exceeds room capacity (${roomCapacity}).\n\n` +
                 `This will create a capacity violation. Do you want to proceed anyway?`
             );
             if (!confirmOverride) {
@@ -3032,7 +3053,7 @@ async function validateDrop(sessionIndex, newDay, newTimeSlot) {
         updatedSession.time_range = labSlots[newTimeSlot] || newTimeSlot;
     }
     
-    // 1. Comprehensive teacher conflict checking (matching Python scheduler)
+    // 1. ✅ FIXED: Comprehensive teacher conflict checking with proper time overlap detection
     const teacherId = session.teacher_id;
     const dayNorm = window.allocationManager.normalizeDayName ? 
                     window.allocationManager.normalizeDayName(newDay) : newDay.toLowerCase();
@@ -3045,29 +3066,30 @@ async function validateDrop(sessionIndex, newDay, newTimeSlot) {
         sessionTimeSlots = [newTimeSlot];
     }
     
-    // Check each time slot for teacher conflicts
-    for (const timeSlot of sessionTimeSlots) {
-        const teacherConflict = allData.find(s => 
-            s !== session &&
-            s.teacher_id === teacherId &&
-            s.day === newDay &&
-            getSessionTimeSlot(s) === timeSlot
-        );
-        
-        if (teacherConflict) {
-            conflicts.push({
-                type: 'teacher_conflict',
-                severity: 'high',
-                message: `Teacher ${session.teacher_name} already has ${teacherConflict.course_code} at ${timeSlot}`,
-                details: {
-                    teacher: session.teacher_name,
-                    conflictingCourse: teacherConflict.course_code,
-                    timeSlot: timeSlot,
-                    scheduleType: teacherConflict.schedule_type
-                }
-            });
-        }
-    }
+    // ✅ FIXED: Check for teacher conflicts using proper time overlap detection
+    // This now checks ALL sessions (both theory and lab) for the teacher at the same day/time
+    const teacherConflicts = allData.filter(s => 
+        s !== session &&
+        s.teacher_id === teacherId &&
+        s.day === newDay &&
+        doTimeSlotsOverlap(getSessionTimeSlot(s), newTimeSlot)
+    );
+    
+    teacherConflicts.forEach(conflictSession => {
+        conflicts.push({
+            type: 'teacher_conflict',
+            severity: 'high',
+            message: `Teacher ${session.teacher_name} already has ${conflictSession.course_code} (${conflictSession.schedule_type}) at ${getSessionTimeSlot(conflictSession)}`,
+            details: {
+                teacher: session.teacher_name,
+                conflictingCourse: conflictSession.course_code,
+                conflictingSessionType: conflictSession.schedule_type,
+                conflictingTimeSlot: getSessionTimeSlot(conflictSession),
+                requestedTimeSlot: newTimeSlot,
+                scheduleType: conflictSession.schedule_type
+            }
+        });
+    });
     
     // 2. Enhanced room conflict checking with cross-schedule validation
     const roomId = session.room_id;
