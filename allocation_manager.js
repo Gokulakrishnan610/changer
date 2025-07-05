@@ -389,15 +389,38 @@ class AllocationManager {
                 }));
             }
             if (session.room_number && session.room_id) {
-                // Determine room type and set appropriate default capacity
-                const roomType = this.getRoomType(session.room_number);
-                const defaultCapacity = roomType === 'theory' ? 70 : 35;
-                let actualCapacity = session.capacity || defaultCapacity;
+                // Use room data integration if available, otherwise fall back to defaults
+                let roomType, actualCapacity;
                 
-                // Special handling for KSL02 and A104/105 room capacity
-                if (session.room_number === 'KSL02' || session.room_number === 'A104/105') {
-                    actualCapacity = 140;
-                    console.log(`✅ Setting ${session.room_number} capacity to 140 in allocation manager`);
+                if (window.roomDataIntegration && window.roomDataIntegration.loaded) {
+                    const roomInfo = window.roomDataIntegration.getRoomInfo(session.room_id);
+                    if (roomInfo) {
+                        roomType = roomInfo.is_lab ? 'lab' : 'theory';
+                        actualCapacity = roomInfo.room_max_cap;
+                        console.log(`✅ Using enhanced room data for ${session.room_number}: ${roomType}, capacity ${actualCapacity}`);
+                    } else {
+                        // Fallback to original logic
+                        roomType = this.getRoomType(session.room_number);
+                        const defaultCapacity = roomType === 'theory' ? 70 : 35;
+                        actualCapacity = session.capacity || defaultCapacity;
+                        
+                        // Special handling for KSL02 and A104/105 room capacity
+                        if (session.room_number === 'KSL02' || session.room_number === 'A104/105') {
+                            actualCapacity = 140;
+                            console.log(`✅ Setting ${session.room_number} capacity to 140 in allocation manager`);
+                        }
+                    }
+                } else {
+                    // Fallback to original logic
+                    roomType = this.getRoomType(session.room_number);
+                    const defaultCapacity = roomType === 'theory' ? 70 : 35;
+                    actualCapacity = session.capacity || defaultCapacity;
+                    
+                    // Special handling for KSL02 and A104/105 room capacity
+                    if (session.room_number === 'KSL02' || session.room_number === 'A104/105') {
+                        actualCapacity = 140;
+                        console.log(`✅ Setting ${session.room_number} capacity to 140 in allocation manager`);
+                    }
                 }
                 
                 this.rooms.add(JSON.stringify({
@@ -640,6 +663,12 @@ class AllocationManager {
 
     // Get available rooms for a specific time slot and course type
     getAvailableRooms(day, timeSlot, courseType = null, excludeSession = null) {
+        // Use enhanced room data integration if available
+        if (window.roomDataIntegration && window.roomDataIntegration.loaded) {
+            return window.roomDataIntegration.getAvailableRoomsForScheduling(day, timeSlot, courseType, excludeSession, this);
+        }
+        
+        // Fallback to original logic
         const availableRooms = [];
         const occupiedRooms = new Set();
         const labOccupiedRooms = new Set(); // Track rooms occupied specifically by lab sessions
